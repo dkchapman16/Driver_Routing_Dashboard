@@ -1,11 +1,22 @@
-# v1.4 UX/Data Update
+# Driver Routing Dashboard – v1.5 Patch
 
-- Dark theme readability improved; modern surfaces & accent
-- Map area widened; left panel compacted
-- Timeline given more space (two-column grid) with chips for **Revenue, Miles, RPM, On‑Time**
-- Revenue now uses **Hauling Fee** (fallback to **Load Amount**)
-- Strict ordering by **Ship Date** (or by **Del. Date** when filter basis switched)
-- New **Filter by: Pickup / Delivery** toggle controls whether the date range uses Ship vs Delivery dates
-- Playback speed selector (Slow/Normal/Fast) and reliable stepping
-- Suppress default Google **A/B** markers to avoid confusion; clean colored polylines instead
-- On‑time KPI: any row where **Shipper Arrival Status** or **Receiver Arrival Status** includes “late” counts as NOT on‑time; blank statuses are excluded from the percentage
+**What’s new**
+
+- Dark theme readability (no white boxes), modern cards, lime accent (#D2F000).
+- Bigger map (left panel narrower), roomier two‑column timeline.
+- Revenue pulled from **Hauling Fee**.
+- **RPM** shown as **Hauling Fee / Miles** (two decimals).
+- Strict chronological sort by **Ship Date** (fallback: Delivery).
+- Date filter **basis** toggle: **Pickup (Ship Date)** or **Delivery (Del. Date)**.
+- Playback fixed with speed control (Slow/Normal/Fast), ordered steps.
+- On‑Time% counts as on‑time when **neither** Shipper nor Receiver Arrival Status contains “late”.
+- Canceled loads filtered by `Load Status`.
+
+**How to apply**
+
+1. In GitHub, open your repo → **Add file → Upload files**.
+2. Upload these two files from this ZIP, replacing existing ones:
+   - `src/App.jsx`
+   - `README.md`
+3. Commit to `main`. Vercel will redeploy automatically (or click **Redeploy**).
+
