@@ -1,3 +1,24 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Force dark theme inputs/cards */
+:root {
+  --accent: #D2F000;
+}
+html.dark, [data-theme="dark"] {
+  color-scheme: dark;
+}
+html.dark input, [data-theme="dark"] input,
+html.dark select, [data-theme="dark"] select,
+html.dark textarea, [data-theme="dark"] textarea {
+  background: #141722 !important;
+  color: #E5E7EB !important;
+  border-color: #2a2f3a !important;
+}
+html.dark .card { background:#141722; color:#E5E7EB; border-color:#2a2f3a; }
+.btn { padding: .45rem .8rem; border-radius: 10px; font-size: .9rem; }
+.btn-accent { background: var(--accent); color: #000; font-weight: 700; }
+.btn-outline { border: 1px solid #2a2f3a; }
+.chip { border: 1px solid #2a2f3a; border-radius: 999px; padding: .2rem .55rem; font-size: .78rem; }
