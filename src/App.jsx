@@ -22,34 +22,26 @@ const COLS = {
   fee: "Hauling Fee",
   shipperArrival: "Shipper Arrival Status",
   receiverArrival: "Receiver Arrival Status",
+  // Optional columns (if missing, we'll infer zeros)
+  loadedMiles: "Loaded Miles",
+  emptyMiles: "Empty Miles",
 };
 
 /** ===== Helpers ===== */
-// Parse Excel numbers OR many string forms, and be resilient to time ranges like "08:00-12:00".
 const excelToDate = (v) => {
   if (v === null || v === undefined || v === "") return null;
   if (typeof v === "number") {
     const base = new Date(1899, 11, 30);
     return new Date(base.getTime() + v * 86400000);
   }
-  if (v instanceof Date && !isNaN(+v)) return v;
-
-  const s = String(v).trim();
-  // Extract the first YYYY-MM-DD or MM/DD/YYYY from the string
-  const m1 = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-  const m2 = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  let d = null;
-  if (m1) {
-    const [_, y, mo, da] = m1;
-    d = new Date(Number(y), Number(mo) - 1, Number(da));
-  } else if (m2) {
-    const [_, mo, da, y] = m2;
-    d = new Date(Number(y), Number(mo) - 1, Number(da));
-  } else {
-    const tryNative = new Date(s);
-    if (!isNaN(+tryNative)) d = tryNative;
+  // try splitting ranges like "08:00-12:00" out of date strings; keep date part
+  if (typeof v === "string" && v.includes(" ")) {
+    const parts = v.split(" ");
+    const parsed = new Date(parts[0]);
+    if (!isNaN(+parsed)) return parsed;
   }
-  return d && !isNaN(+d) ? d : null;
+  const d = new Date(v);
+  return isNaN(+d) ? null : d;
 };
 const isCanceled = (s) => s && /cancel+ed|cancelled|canceled/i.test(String(s));
 const isLate = (s) => s && /late/i.test(String(s));
@@ -62,6 +54,22 @@ const colorByDriver = (key) => {
   const hue = Math.abs(hash) % 360; return `hsl(${hue} 70% 55%)`;
 };
 const fmt = (d) => (d ? d.toLocaleDateString() : "—");
+
+/** Simple inline sparkline component (SVG) */
+const Sparkline = ({ values=[], width=80, height=24 }) => {
+  const max = Math.max(...values, 1);
+  const step = width / Math.max(values.length - 1, 1);
+  const pts = values.map((v, i) => {
+    const x = i * step;
+    const y = height - (v / max) * height;
+    return `${x},${y}`;
+  }).join(" ");
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+      <polyline fill="none" stroke="#D2F000" strokeWidth="2" points={pts} />
+    </svg>
+  );
+};
 
 /** ===== Component ===== */
 export default function App() {
@@ -135,10 +143,10 @@ export default function App() {
 
   /** Build legs (ordered + filtered) */
   const legs = useMemo(() => {
-    // Normalize and guard when range is reversed
-    let from = dateFrom ? new Date(dateFrom + "T00:00:00") : null;
-    let to   = dateTo   ? new Date(dateTo   + "T23:59:59") : null;
-    if (from && to && from > to) { const t = from; from = to; to = t; }
+    // normalize range
+    let f = dateFrom ? new Date(dateFrom + "T00:00:00") : null;
+    let t = dateTo   ? new Date(dateTo   + "T23:59:59") : null;
+    if (f && t && f > t) { const tmp = f; f = t; t = tmp; }
 
     const cityState = (city, st) => [city, st].filter(Boolean).join(", ");
     const originCS  = (r) => cityState(r[COLS.shipperCity], r[COLS.shipperState]);
@@ -148,46 +156,95 @@ export default function App() {
       .filter(r => selDrivers.length ? selDrivers.includes((r[COLS.driver] ?? "").toString().trim()) : true)
       .filter(r => !isCanceled(r[COLS.status]))
       .filter(r => {
-        const d = basis === "pickup" ? excelToDate(r[COLS.shipDate]) : excelToDate(r[COLS.delDate]);
-        if (!from && !to) return true;
-        if (!d) return false;
-        if (from && d < from) return false;
-        if (to && d > to) return false;
+        const baseD = basis === "pickup" ? excelToDate(r[COLS.shipDate]) : excelToDate(r[COLS.delDate]);
+        if (!f && !t) return true;
+        if (!baseD) return false;
+        if (f && baseD < f) return false;
+        if (t && baseD > t) return false;
         return true;
       })
-      .map(r => ({
-        driver: (r[COLS.driver] ?? "").toString().trim(),
-        loadNo: r[COLS.loadNo],
-        shipDate: excelToDate(r[COLS.shipDate]),
-        delDate: excelToDate(r[COLS.delDate]),
-        originFull: [r[COLS.shipperName], r[COLS.shipperAddr], originCS(r)].filter(Boolean).join(", "),
-        destFull:   [r[COLS.receiverName], r[COLS.receiverAddr], destCS(r)].filter(Boolean).join(", "),
-        originCS: originCS(r),
-        destCS: destCS(r),
-        miles: Number(r[COLS.miles] || 0),
-        fee: Number(r[COLS.fee] || 0),
-        onTime: !(isLate(r[COLS.shipperArrival]) || isLate(r[COLS.receiverArrival])),
-      }))
+      .map(r => {
+        const lm = Number(r[COLS.loadedMiles] || 0);
+        const em = Number(r[COLS.emptyMiles] || 0);
+        const totalMiles = Number(r[COLS.miles] || (lm + em) || 0);
+        const loaded = lm || (totalMiles && em ? totalMiles - em : lm);
+        const empty = em || Math.max(0, totalMiles - loaded);
+        return ({
+          driver: (r[COLS.driver] ?? "").toString().trim(),
+          loadNo: r[COLS.loadNo],
+          shipDate: excelToDate(r[COLS.shipDate]),
+          delDate: excelToDate(r[COLS.delDate]),
+          originFull: [r[COLS.shipperName], r[COLS.shipperAddr], originCS(r)].filter(Boolean).join(", "),
+          destFull:   [r[COLS.receiverName], r[COLS.receiverAddr], destCS(r)].filter(Boolean).join(", "),
+          originCS: originCS(r),
+          destCS: destCS(r),
+          miles: totalMiles,
+          loadedMiles: loaded,
+          emptyMiles: empty,
+          fee: Number(r[COLS.fee] || 0),
+          onTime: !(isLate(r[COLS.shipperArrival]) || isLate(r[COLS.receiverArrival])),
+        });
+      })
       .filter(x => x.originFull && x.destFull)
       .sort((a, b) => {
-        // Strict chronological order by Ship Date, Delivery as fallback when Ship Date missing
-        const aKey = a.shipDate ?? a.delDate;
-        const bKey = b.shipDate ?? b.delDate;
-        return (aKey?.getTime?.() ?? 0) - (bKey?.getTime?.() ?? 0);
+        const aKey = a.shipDate?.getTime?.() ?? a.delDate?.getTime?.() ?? 0;
+        const bKey = b.shipDate?.getTime?.() ?? b.delDate?.getTime?.() ?? 0;
+        return aKey - bKey;
       });
 
     return filtered;
   }, [rows, selDrivers, dateFrom, dateTo, basis]);
 
-  /** KPIs */
+  /** Fleet KPIs including Utilization & Deadhead% */
   const kpi = useMemo(() => {
     const loads = legs.length;
     const miles = Math.round(legs.reduce((a, b) => a + (b.miles || 0), 0));
+    const loaded = Math.round(legs.reduce((a, b) => a + (b.loadedMiles || 0), 0));
+    const empty = Math.max(0, miles - loaded);
     const revenue = legs.reduce((a, b) => a + (b.fee || 0), 0);
     const timed = legs.filter(l => l.onTime !== null);
     const ontime = timed.length ? Math.round(100 * timed.filter(l => l.onTime).length / timed.length) : 0;
     const fleetRPM = miles > 0 ? (revenue / miles).toFixed(2) : "0.00";
-    return { loads, miles, revenue, ontime, fleetRPM };
+    const utilization = miles > 0 ? Math.round((loaded / (loaded + empty)) * 100) : 0;
+    const deadheadPct = (loaded + empty) > 0 ? Math.round((empty / (loaded + empty)) * 100) : 0;
+    return { loads, miles, revenue, ontime, fleetRPM, utilization, deadheadPct, loaded, empty };
+  }, [legs]);
+
+  /** Driver insights: totals + 7-day revenue sparkline */
+  const driverInsights = useMemo(() => {
+    const map = new Map();
+    // establish 7 day window based on max(ship/del) in legs or today
+    const maxTs = legs.reduce((m, l) => Math.max(m, l.shipDate?.getTime?.() ?? l.delDate?.getTime?.() ?? 0), 0);
+    const anchor = maxTs ? new Date(maxTs) : new Date();
+    const days = [...Array(7)].map((_, i) => {
+      const d = new Date(anchor);
+      d.setDate(anchor.getDate() - (6 - i));
+      d.setHours(0,0,0,0);
+      return d;
+    });
+    const dayKey = (d) => d.toISOString().slice(0,10);
+
+    legs.forEach(l => {
+      const key = l.driver || "Unassigned";
+      if (!map.has(key)) map.set(key, { driver: key, revenue: 0, loaded: 0, empty: 0, series: days.map(() => 0) });
+      const agg = map.get(key);
+      agg.revenue += l.fee || 0;
+      agg.loaded += l.loadedMiles || 0;
+      agg.empty += l.emptyMiles || 0;
+      const d = l.shipDate || l.delDate;
+      if (d) {
+        const dk = dayKey(d);
+        days.forEach((day, idx) => {
+          if (dayKey(day) === dk) agg.series[idx] += l.fee || 0;
+        });
+      }
+    });
+    // finalize metrics
+    return Array.from(map.values()).map(v => {
+      const totalMi = v.loaded + v.empty;
+      const util = totalMi > 0 ? Math.round((v.loaded / totalMi) * 100) : 0;
+      return { ...v, utilization: util };
+    }).sort((a, b) => b.revenue - a.revenue);
   }, [legs]);
 
   /** Directions + endpoints (for straight lines) */
@@ -249,12 +306,7 @@ export default function App() {
   const dragRef = useRef(false);
   useEffect(() => localStorage.setItem("left_width_px", String(leftWidth)), [leftWidth]);
   useEffect(() => {
-    const onMove = (e) => {
-      if (!dragRef.current) return;
-      const x = e.clientX;
-      const min = 280, max = 700;
-      setLeftWidth(Math.max(min, Math.min(max, x - 16))); // padding offset
-    };
+    const onMove = (e) => { if (!dragRef.current) return; const x = e.clientX; const min = 280, max = 700; setLeftWidth(Math.max(min, Math.min(max, x - 16))); };
     const onUp = () => { dragRef.current = false; };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -282,6 +334,8 @@ export default function App() {
     btn: { padding: "8px 12px", border: "1px solid #232838", borderRadius: 10, cursor: "pointer", color: "#e6e8ee", background: "transparent" },
     btnAccent: { padding: "8px 12px", borderRadius: 10, cursor: "pointer", color: "#0b0d12", background: "#D2F000", border: "1px solid #D2F000", fontWeight: 700 },
   };
+
+  const deadheadThreshold = Number(localStorage.getItem("deadhead_threshold") || 20); // %
 
   return (
     <div style={styles.page}>
@@ -375,27 +429,35 @@ export default function App() {
 
           {/* KPIs */}
           <div style={{ ...styles.card, padding: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0,1fr))", gap: 10 }}>
-              <div style={{ ...styles.card, padding: 12 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Loads</div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.loads}</div>
-              </div>
-              <div style={{ ...styles.card, padding: 12 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Miles</div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>{num(kpi.miles)}</div>
-              </div>
-              <div style={{ ...styles.card, padding: 12 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Revenue</div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>{money(kpi.revenue)}</div>
-              </div>
-              <div style={{ ...styles.card, padding: 12 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Fleet RPM</div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.fleetRPM}</div>
-              </div>
-              <div style={{ ...styles.card, padding: 12 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>On‑Time %</div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.ontime}%</div>
-              </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 10 }}>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Loads</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.loads}</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Miles</div><div style={{ fontSize: 22, fontWeight: 800 }}>{num(kpi.miles)}</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Revenue</div><div style={{ fontSize: 22, fontWeight: 800 }}>{money(kpi.revenue)}</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Fleet RPM</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.fleetRPM}</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>On‑Time %</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.ontime}%</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Utilization %</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.utilization}%</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Deadhead %</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.deadheadPct}%</div></div>
+            </div>
+          </div>
+
+          {/* Driver insights: 7-day revenue sparkline */}
+          <div style={{ ...styles.card, padding: 12 }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Driver Insights (7‑day revenue, utilization)</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {driverInsights.map((d, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, border: "1px solid #232838", borderRadius: 10, padding: "8px 10px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ width: 10, height: 10, background: colorByDriver(d.driver), borderRadius: 999 }} />
+                    <div style={{ fontWeight: 700 }}>{d.driver}</div>
+                    <div style={{ fontSize: 12, color: "#8b93a7" }}>Util {d.utilization}%</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <Sparkline values={d.series} />
+                    <div style={{ fontSize: 12, color: "#8b93a7" }}>{money(d.revenue)}</div>
+                  </div>
+                </div>
+              ))}
+              {driverInsights.length === 0 && <div style={{ color: "#8b93a7" }}>No data for selected range.</div>}
             </div>
           </div>
 
@@ -413,12 +475,15 @@ export default function App() {
             </select>
           </div>
 
-          {/* Load list – always show pickup + delivery dates */}
+          {/* Load list with deadhead alerts */}
           <div style={{ ...styles.card, padding: 12 }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>Loads</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {legs.map((l, i) => {
                 const c = colorByDriver(l.driver);
+                const total = (l.loadedMiles || 0) + (l.emptyMiles || 0);
+                const deadPct = total > 0 ? Math.round((l.emptyMiles || 0) / total * 100) : 0;
+                const highDead = deadPct > deadheadThreshold;
                 return (
                   <div key={i} style={{ ...styles.card, padding: 12, borderColor: c }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
@@ -431,11 +496,14 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                         <span style={styles.chip}>Rev {money(l.fee)}</span>
                         <span style={styles.chip}>Mi {num(l.miles)}</span>
+                        <span style={styles.chip}>Loaded {num(l.loadedMiles)}</span>
+                        <span style={styles.chip}>Empty {num(l.emptyMiles)}</span>
                         <span style={styles.chip}>RPM {rpm(l.fee, l.miles)}</span>
                         <span style={styles.chip}>On‑Time {l.onTime ? "Yes" : "No"}</span>
+                        {highDead && <span style={{ ...styles.chip, borderColor: "#ef4444", color: "#ef4444" }}>High Deadhead {deadPct}%</span>}
                       </div>
                     </div>
                   </div>
