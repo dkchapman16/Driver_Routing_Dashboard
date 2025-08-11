@@ -25,14 +25,31 @@ const COLS = {
 };
 
 /** ===== Helpers ===== */
+// Parse Excel numbers OR many string forms, and be resilient to time ranges like "08:00-12:00".
 const excelToDate = (v) => {
   if (v === null || v === undefined || v === "") return null;
   if (typeof v === "number") {
     const base = new Date(1899, 11, 30);
     return new Date(base.getTime() + v * 86400000);
   }
-  const d = new Date(v);
-  return isNaN(+d) ? null : d;
+  if (v instanceof Date && !isNaN(+v)) return v;
+
+  const s = String(v).trim();
+  // Extract the first YYYY-MM-DD or MM/DD/YYYY from the string
+  const m1 = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  const m2 = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  let d = null;
+  if (m1) {
+    const [_, y, mo, da] = m1;
+    d = new Date(Number(y), Number(mo) - 1, Number(da));
+  } else if (m2) {
+    const [_, mo, da, y] = m2;
+    d = new Date(Number(y), Number(mo) - 1, Number(da));
+  } else {
+    const tryNative = new Date(s);
+    if (!isNaN(+tryNative)) d = tryNative;
+  }
+  return d && !isNaN(+d) ? d : null;
 };
 const isCanceled = (s) => s && /cancel+ed|cancelled|canceled/i.test(String(s));
 const isLate = (s) => s && /late/i.test(String(s));
@@ -118,8 +135,10 @@ export default function App() {
 
   /** Build legs (ordered + filtered) */
   const legs = useMemo(() => {
-    const from = dateFrom ? new Date(dateFrom + "T00:00:00") : null;
-    const to   = dateTo   ? new Date(dateTo   + "T23:59:59") : null;
+    // Normalize and guard when range is reversed
+    let from = dateFrom ? new Date(dateFrom + "T00:00:00") : null;
+    let to   = dateTo   ? new Date(dateTo   + "T23:59:59") : null;
+    if (from && to && from > to) { const t = from; from = to; to = t; }
 
     const cityState = (city, st) => [city, st].filter(Boolean).join(", ");
     const originCS  = (r) => cityState(r[COLS.shipperCity], r[COLS.shipperState]);
@@ -147,11 +166,15 @@ export default function App() {
         destCS: destCS(r),
         miles: Number(r[COLS.miles] || 0),
         fee: Number(r[COLS.fee] || 0),
-        // On‑time uses Shipper Arrival + Receiver Arrival only (no driver delivery status)
         onTime: !(isLate(r[COLS.shipperArrival]) || isLate(r[COLS.receiverArrival])),
       }))
       .filter(x => x.originFull && x.destFull)
-      .sort((a, b) => (a.shipDate?.getTime?.() ?? 0) - (b.shipDate?.getTime?.() ?? 0));
+      .sort((a, b) => {
+        // Strict chronological order by Ship Date, Delivery as fallback when Ship Date missing
+        const aKey = a.shipDate ?? a.delDate;
+        const bKey = b.shipDate ?? b.delDate;
+        return (aKey?.getTime?.() ?? 0) - (bKey?.getTime?.() ?? 0);
+      });
 
     return filtered;
   }, [rows, selDrivers, dateFrom, dateTo, basis]);
@@ -167,9 +190,9 @@ export default function App() {
     return { loads, miles, revenue, ontime, fleetRPM };
   }, [legs]);
 
-  /** Directions + endpoints */
-  const [routes, setRoutes] = useState([]);
-  const [endpoints, setEndpoints] = useState([]);
+  /** Directions + endpoints (for straight lines) */
+  const [routes, setRoutes] = useState([]); // DirectionsResult[]
+  const [endpoints, setEndpoints] = useState([]); // {start, end, color, mid}
   useEffect(() => {
     if (!isLoaded || !legs.length) { setRoutes([]); setEndpoints([]); return; }
     let cancelled = false;
@@ -185,7 +208,10 @@ export default function App() {
           const lg = res.routes[0]?.legs[0];
           if (lg) {
             const start = lg.start_location, end = lg.end_location;
-            const mid = new google.maps.LatLng((start.lat() + end.lat()) / 2, (start.lng() + end.lng()) / 2);
+            const mid = new google.maps.LatLng(
+              (start.lat() + end.lat()) / 2,
+              (start.lng() + end.lng()) / 2
+            );
             Es.push({ start, end, mid, color: colorByDriver(legs[i].driver) });
           }
           await new Promise(r => setTimeout(r, 120));
@@ -201,31 +227,51 @@ export default function App() {
   /** Map fit + dynamic height */
   const mapRef = useRef(null);
   const [mapHeight, setMapHeight] = useState(560);
-  useEffect(() => { setMapHeight(Math.max(420, Math.min(820, 420 + legs.length * 18))); }, [legs.length]);
+  useEffect(() => {
+    const h = Math.max(420, Math.min(820, 420 + legs.length * 18));
+    setMapHeight(h);
+  }, [legs.length]);
+
   useEffect(() => {
     if (!isLoaded || !mapRef.current) return;
     const m = mapRef.current;
     const b = new google.maps.LatLngBounds(); let had = false;
-    if (routes.length) { routes.forEach(r => r.routes[0]?.overview_path?.forEach(p => { b.extend(p); had = true; })); }
-    else { endpoints.forEach(ep => { b.extend(ep.start); b.extend(ep.end); had = true; }); }
+    if (routeStyle === "driving") {
+      routes.forEach(r => r.routes[0]?.overview_path?.forEach(p => { b.extend(p); had = true; }));
+    } else {
+      endpoints.forEach(ep => { b.extend(ep.start); b.extend(ep.end); had = true; });
+    }
     if (had) m.fitBounds(b, 64);
-  }, [isLoaded, routes.length, endpoints.length]);
+  }, [isLoaded, routes.length, endpoints.length, routeStyle]);
 
-  /** Draggable divider */
+  /** Draggable divider (desktop) */
   const [leftWidth, setLeftWidth] = useState(() => Number(localStorage.getItem("left_width_px") || 380));
   const dragRef = useRef(false);
   useEffect(() => localStorage.setItem("left_width_px", String(leftWidth)), [leftWidth]);
   useEffect(() => {
-    const onMove = (e) => { if (!dragRef.current) return; const x = e.clientX; setLeftWidth(Math.max(280, Math.min(700, x - 16))); };
-    const onUp = () => (dragRef.current = false);
-    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+    const onMove = (e) => {
+      if (!dragRef.current) return;
+      const x = e.clientX;
+      const min = 280, max = 700;
+      setLeftWidth(Math.max(min, Math.min(max, x - 16))); // padding offset
+    };
+    const onUp = () => { dragRef.current = false; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
   }, []);
 
+  /** Reset (keeps uploaded rows / sheet link) */
   function onReset() {
-    setSelDrivers([]); setDateFrom(""); setDateTo(""); setBasis("pickup"); setRouteStyle("lines"); setShowTraffic(false);
+    setSelDrivers([]);
+    setDateFrom("");
+    setDateTo("");
+    setBasis("pickup");
+    setRouteStyle("lines");
+    setShowTraffic(false);
   }
 
+  /** UI styles */
   const styles = {
     page: { padding: 16, background: "#0f1115", color: "#e6e8ee", fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial" },
     card: { background: "#151923", border: "1px solid #232838", borderRadius: 14, boxShadow: "0 8px 20px rgba(0,0,0,.25)" },
@@ -239,11 +285,15 @@ export default function App() {
 
   return (
     <div style={styles.page}>
+      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
         <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Driver Routing Dashboard</h1>
-        <div style={{ display: "flex", gap: 8 }}><button style={styles.btn} onClick={onReset}>Reset</button></div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={styles.btn} onClick={onReset}>Reset</button>
+        </div>
       </div>
 
+      {/* Top filters bar */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 8 }}>
         <div style={{ ...styles.card, padding: 8 }}>
           <div style={{ fontSize: 12, ...styles.muted }}>Date from</div>
@@ -291,8 +341,11 @@ export default function App() {
         </div>
       </div>
 
+      {/* Main grid with draggable divider */}
       <div style={{ display: "grid", gridTemplateColumns: `${leftWidth}px 6px 1fr`, gap: 14, marginTop: 12 }}>
+        {/* LEFT PANE */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10, width: leftWidth }}>
+          {/* Source + Key */}
           <div style={{ ...styles.card, padding: 12 }}>
             <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
               <div style={{ flex: 1, minWidth: 220 }}>
@@ -320,25 +373,47 @@ export default function App() {
             </div>
           </div>
 
+          {/* KPIs */}
           <div style={{ ...styles.card, padding: 12 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0,1fr))", gap: 10 }}>
-              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Loads</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.loads}</div></div>
-              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Miles</div><div style={{ fontSize: 22, fontWeight: 800 }}>{num(kpi.miles)}</div></div>
-              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Revenue</div><div style={{ fontSize: 22, fontWeight: 800 }}>{money(kpi.revenue)}</div></div>
-              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Fleet RPM</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.fleetRPM}</div></div>
-              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>On‑Time %</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.ontime}%</div></div>
+              <div style={{ ...styles.card, padding: 12 }}>
+                <div style={{ fontSize: 12, ...styles.muted }}>Loads</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.loads}</div>
+              </div>
+              <div style={{ ...styles.card, padding: 12 }}>
+                <div style={{ fontSize: 12, ...styles.muted }}>Miles</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>{num(kpi.miles)}</div>
+              </div>
+              <div style={{ ...styles.card, padding: 12 }}>
+                <div style={{ fontSize: 12, ...styles.muted }}>Revenue</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>{money(kpi.revenue)}</div>
+              </div>
+              <div style={{ ...styles.card, padding: 12 }}>
+                <div style={{ fontSize: 12, ...styles.muted }}>Fleet RPM</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.fleetRPM}</div>
+              </div>
+              <div style={{ ...styles.card, padding: 12 }}>
+                <div style={{ fontSize: 12, ...styles.muted }}>On‑Time %</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.ontime}%</div>
+              </div>
             </div>
           </div>
 
+          {/* Driver picker */}
           <div style={{ ...styles.card, padding: 12 }}>
             <div style={{ fontSize: 12, ...styles.muted, marginBottom: 6 }}>Drivers</div>
-            <select multiple size={Math.min(8, Math.max(4, drivers.length || 6))}
-              value={selDrivers} onChange={(e) => setSelDrivers([...e.target.selectedOptions].map(o => o.value))}
-              style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
+            <select
+              multiple
+              size={Math.min(8, Math.max(4, drivers.length || 6))}
+              value={selDrivers}
+              onChange={(e) => setSelDrivers([...e.target.selectedOptions].map(o => o.value))}
+              style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}
+            >
               {drivers.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
 
+          {/* Load list – always show pickup + delivery dates */}
           <div style={{ ...styles.card, padding: 12 }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>Loads</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -371,33 +446,87 @@ export default function App() {
           </div>
         </div>
 
-        <div style={styles.divider} onMouseDown={() => (dragRef.current = true)} title="Drag to resize" />
+        {/* DRAG DIVIDER */}
+        <div
+          style={styles.divider}
+          onMouseDown={() => (dragRef.current = true)}
+          title="Drag to resize"
+        />
 
+        {/* MAP */}
         <div style={{ ...styles.card, position: "relative", height: mapHeight }}>
-          {apiKey ? (isLoaded ? (
-            <GoogleMap onLoad={(m) => (mapRef.current = m)} mapContainerStyle={{ width: "100%", height: "100%" }}
-              center={{ lat: 36.5, lng: -96.5 }} zoom={5}
-              options={{ streetViewControl: false, mapTypeControl: true, fullscreenControl: true }}>
-              {showTraffic && <TrafficLayer autoUpdate />}
-              {routeStyle === "driving" && routes.map((r, idx) => (
-                <DirectionsRenderer key={idx} directions={r}
-                  options={{ preserveViewport: true, polylineOptions: { strokeColor: colorByDriver(legs[idx]?.driver || String(idx)), strokeWeight: 4, strokeOpacity: 0.95 } }}/>
-              ))}
-              {routeStyle === "lines" && endpoints.map((ep, idx) => (
-                <React.Fragment key={idx}>
-                  <Marker position={ep.start} icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#22c55e", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
-                  <Marker position={ep.end} icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#ef4444", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
-                  <Polyline path={[ep.start, ep.end]} options={{ strokeColor: ep.color, strokeOpacity: 0.9, strokeWeight: 3 }}/>
-                  <Marker position={ep.mid} label={{ text: String(idx + 1), color: "#0b0d12", fontWeight: "800" }}
-                    icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: "#D2F000", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
-                </React.Fragment>
-              ))}
-            </GoogleMap>
-          ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#8b93a7" }}>Loading Google Maps…</div>)
-          ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#8b93a7" }}>Paste your Google Maps API key to load the map</div>)}
+          {apiKey ? (
+            isLoaded ? (
+              <GoogleMap
+                onLoad={(m) => (mapRef.current = m)}
+                mapContainerStyle={{ width: "100%", height: "100%" }}
+                center={{ lat: 36.5, lng: -96.5 }}
+                zoom={5}
+                options={{ streetViewControl: false, mapTypeControl: true, fullscreenControl: true }}
+              >
+                {showTraffic && <TrafficLayer autoUpdate />}
 
-          <div style={{ position: "absolute", left: 16, bottom: 16, padding: "8px 10px", background: "rgba(15,17,21,.9)",
-                        border: "1px solid #232838", borderRadius: 10, fontSize: 12 }}>
+                {routeStyle === "driving" &&
+                  routes.map((r, idx) => (
+                    <DirectionsRenderer
+                      key={idx}
+                      directions={r}
+                      options={{
+                        preserveViewport: true,
+                        polylineOptions: {
+                          strokeColor: colorByDriver(legs[idx]?.driver || String(idx)),
+                          strokeWeight: 4,
+                          strokeOpacity: 0.95,
+                        },
+                      }}
+                    />
+                  ))}
+
+                {routeStyle === "lines" &&
+                  endpoints.map((ep, idx) => (
+                    <React.Fragment key={idx}>
+                      {/* Pickup / Delivery dots */}
+                      <Marker
+                        position={ep.start}
+                        icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#22c55e", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}
+                      />
+                      <Marker
+                        position={ep.end}
+                        icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#ef4444", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}
+                      />
+                      {/* Straight line */}
+                      <Polyline path={[ep.start, ep.end]} options={{ strokeColor: ep.color, strokeOpacity: 0.9, strokeWeight: 3 }} />
+                      {/* Number label near the lane (midpoint) */}
+                      <Marker
+                        position={ep.mid}
+                        label={{ text: String(idx + 1), color: "#0b0d12", fontWeight: "800" }}
+                        icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: "#D2F000", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}
+                      />
+                    </React.Fragment>
+                  ))}
+              </GoogleMap>
+            ) : (
+              <div style={{ display: "grid", placeItems: "center", height: "100%", color: "#8b93a7" }}>Loading Google Maps…</div>
+            )
+          ) : (
+            <div style={{ display: "grid", placeItems: "center", height: "100%", color: "#8b93a7" }}>
+              Paste your Google Maps API key to load the map
+            </div>
+          )}
+
+          {/* Legend */}
+          <div
+            style={{
+              position: "absolute",
+              left: 16,
+              bottom: 16,
+              padding: "8px 10px",
+              background: "rgba(15,17,21,.9)",
+              border: "1px solid #232838",
+              borderRadius: 10,
+              fontSize: 12,
+            }}
+          >
             Route: {routeStyle === "lines" ? "Straight lines (pickup→delivery)" : "Driving directions"} • Traffic: {showTraffic ? "On" : "Off"}
           </div>
         </div>
