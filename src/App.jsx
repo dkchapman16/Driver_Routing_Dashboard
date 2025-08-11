@@ -72,6 +72,9 @@ export default function App() {
   useEffect(() => localStorage.setItem("gmaps_api_key", apiKey || ""), [apiKey]);
   const { isLoaded } = useJsApiLoader({ id: "gmaps-script", googleMapsApiKey: apiKey || "", libraries: ["places"] });
 
+  /** Tabs */
+  const [tab, setTab] = useState("dashboard");
+
   /** Data Source */
   const [dataSource, setDataSource] = useState(localStorage.getItem("data_source") || "upload");
   const [sheetUrl, setSheetUrl] = useState(localStorage.getItem("sheet_url") || "");
@@ -81,10 +84,6 @@ export default function App() {
   /** Rows */
   const [rows, setRows] = useState([]);
   const [fileName, setFileName] = useState("");
-
-  /** Tabs (NEW: visible Insights tab) */
-  const [tab, setTab] = useState(localStorage.getItem("ui_tab") || "dashboard");
-  useEffect(() => localStorage.setItem("ui_tab", tab), [tab]);
 
   async function handleFile(e) {
     const f = e.target.files?.[0]; if (!f) return;
@@ -175,7 +174,7 @@ export default function App() {
     const timed = legs.filter(l => l.onTime !== null);
     const ontime = timed.length ? Math.round(100 * timed.filter(l => l.onTime).length / timed.length) : 0;
     const fleetRPM = miles > 0 ? (revenue / miles).toFixed(2) : "0.00";
-    const utilization = miles > 0 ? Math.round((loaded / (loaded + empty)) * 100) : 0;
+    const utilization = (loaded + empty) > 0 ? Math.round((loaded / (loaded + empty)) * 100) : 0;
     const deadheadPct = (loaded + empty) > 0 ? Math.round((empty / (loaded + empty)) * 100) : 0;
     return { loads, miles, revenue, ontime, fleetRPM, utilization, deadheadPct, loaded, empty };
   }, [legs]);
@@ -184,11 +183,8 @@ export default function App() {
     const map = new Map();
     const maxTs = legs.reduce((m, l) => Math.max(m, l.shipDate?.getTime?.() ?? l.delDate?.getTime?.() ?? 0), 0);
     const anchor = maxTs ? new Date(maxTs) : new Date();
-    const days = [...Array(7)].map((_, i) => {
-      const d = new Date(anchor); d.setDate(anchor.getDate() - (6 - i)); d.setHours(0,0,0,0); return d;
-    });
+    const days = [...Array(7)].map((_, i) => { const d = new Date(anchor); d.setDate(anchor.getDate() - (6 - i)); d.setHours(0,0,0,0); return d; });
     const dayKey = (d) => d.toISOString().slice(0,10);
-
     legs.forEach(l => {
       const key = l.driver || "Unassigned";
       if (!map.has(key)) map.set(key, { driver: key, revenue: 0, loaded: 0, empty: 0, series: days.map(() => 0) });
@@ -214,11 +210,8 @@ export default function App() {
   const [endpoints, setEndpoints] = useState([]);
   const mapRef = useRef(null);
   const [mapHeight, setMapHeight] = useState(560);
-  const [leftWidth, setLeftWidth] = useState(() => Number(localStorage.getItem("left_width_px") || 380));
-  const dragRef = useRef(false);
-
   useEffect(() => { const h = Math.max(420, Math.min(820, 420 + legs.length * 18)); setMapHeight(h); }, [legs.length]);
-  useEffect(() => { localStorage.setItem("left_width_px", String(leftWidth)); }, [leftWidth]);
+
   useEffect(() => {
     if (!isLoaded || !legs.length) { setRoutes([]); setEndpoints([]); return; }
     let cancelled = false;
@@ -252,6 +245,7 @@ export default function App() {
     if (had) m.fitBounds(b, 64);
   }, [isLoaded, routes.length, endpoints.length]);
 
+  /** Styles + helpers */
   const styles = {
     page: { padding: 16, background: "#0f1115", color: "#e6e8ee", fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial" },
     card: { background: "#151923", border: "1px solid #232838", borderRadius: 14, boxShadow: "0 8px 20px rgba(0,0,0,.25)" },
@@ -269,9 +263,10 @@ export default function App() {
     setSelDrivers([]); setDateFrom(""); setDateTo(""); setBasis("pickup"); setRouteStyle("lines"); setShowTraffic(false);
   }
 
-  /** Top bar with TABS (Dashboard / Insights) */
+  /** UI */
   return (
     <div style={styles.page}>
+      {/* Tabs + Reset */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={styles.tab(tab === "dashboard")} onClick={() => setTab("dashboard")}>Dashboard</button>
@@ -279,13 +274,167 @@ export default function App() {
             Insights <span style={styles.newBadge}>NEW</span>
           </button>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button style={styles.btn} onClick={onReset}>Reset</button>
-        </div>
+        <button style={styles.btn} onClick={onReset}>Reset</button>
       </div>
 
-      {/* === INSIGHTS TAB === */}
-      {tab === "insights" ? (
+      {/* DASHBOARD TAB */}
+      {tab === "dashboard" && (
+        <>
+          {/* Filters */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 8 }}>
+            <div style={{ ...styles.card, padding: 8 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Date from</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input ref={fromRef} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                      style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                <button style={styles.btn} onClick={() => fromRef.current?.showPicker?.()}>📅</button>
+              </div>
+            </div>
+            <div style={{ ...styles.card, padding: 8 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Date to</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input ref={toRef} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                      style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                <button style={styles.btn} onClick={() => toRef.current?.showPicker?.()}>📅</button>
+              </div>
+            </div>
+            <div style={{ ...styles.card, padding: 8 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Date basis</div>
+              <select value={basis} onChange={(e) => setBasis(e.target.value)}
+                      style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
+                <option value="pickup">Pickup (Ship Date)</option>
+                <option value="delivery">Delivery (Del. Date)</option>
+              </select>
+            </div>
+            <div style={{ ...styles.card, padding: 8 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Route style</div>
+              <select value={routeStyle} onChange={(e) => setRouteStyle(e.target.value)}
+                      style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
+                <option value="lines">Straight Lines</option>
+                <option value="driving">Driving Directions</option>
+              </select>
+            </div>
+            <div style={{ ...styles.card, padding: 8 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Traffic</div>
+              <button style={styles.btn} onClick={() => setShowTraffic(v => !v)}>{showTraffic ? "On" : "Off"}</button>
+            </div>
+            <div style={{ ...styles.card, padding: 8 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Data Source</div>
+              <select value={dataSource} onChange={(e) => setDataSource(e.target.value)}
+                      style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
+                <option value="upload">Upload</option>
+                <option value="sheets">Google Sheets</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Source + Key */}
+          <div style={{ ...styles.card, padding: 12, marginTop: 10 }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <div style={{ fontSize: 12, ...styles.muted }}>Google Maps API Key</div>
+                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+                       placeholder="Paste your key"
+                       style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+              </div>
+
+              {dataSource === "upload" ? (
+                <div style={{ minWidth: 260 }}>
+                  <div style={{ fontSize: 12, ...styles.muted }}>Upload Excel/CSV</div>
+                  <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile}
+                         style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                  {fileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fileName}</div>}
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 420 }}>
+                  <input type="url" placeholder="Paste published CSV link (Google Sheets → File > Share > Publish to web → CSV)"
+                         value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)}
+                         style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                  <button style={styles.btnAccent} onClick={() => syncFromSheet()}>Sync</button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* KPIs row */}
+          <div style={{ ...styles.card, padding: 12, marginTop: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 10 }}>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Loads</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.loads}</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Miles</div><div style={{ fontSize: 22, fontWeight: 800 }}>{num(kpi.miles)}</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Revenue</div><div style={{ fontSize: 22, fontWeight: 800 }}>{money(kpi.revenue)}</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Fleet RPM</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.fleetRPM}</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>On‑Time %</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.ontime}%</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Utilization %</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.utilization}%</div></div>
+              <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Deadhead %</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.deadheadPct}%</div></div>
+            </div>
+          </div>
+
+          {/* Drivers + Loads + Map grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: 14, marginTop: 12 }}>
+            {/* Drivers + Loads list */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ ...styles.card, padding: 12 }}>
+                <div style={{ fontSize: 12, ...styles.muted, marginBottom: 6 }}>Drivers</div>
+                <select multiple size={Math.min(8, Math.max(4, drivers.length || 6))}
+                        value={selDrivers} onChange={(e) => setSelDrivers([...e.target.selectedOptions].map(o => o.value))}
+                        style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
+                  {drivers.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+
+              <div style={{ ...styles.card, padding: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Loads</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {legs.map((l, i) => {
+                    const c = colorByDriver(l.driver);
+                    const total = (l.loadedMiles || 0) + (l.emptyMiles || 0);
+                    const deadPct = total > 0 ? Math.round((l.emptyMiles || 0) / total * 100) : 0;
+                    return (
+                      <div key={i} style={{ ...styles.card, padding: 12, borderColor: c }}>
+                        <div style={{ fontWeight: 700 }}>{l.driver} • Load {l.loadNo ?? ""}</div>
+                        <div style={{ ...styles.muted, fontSize: 12 }}>{fmt(l.shipDate)} pickup • {fmt(l.delDate)} delivery — {l.originCS} → {l.destCS}</div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                          <span style={styles.chip}>Rev {money(l.fee)}</span>
+                          <span style={styles.chip}>Mi {num(l.miles)}</span>
+                          <span style={styles.chip}>Loaded {num(l.loadedMiles)}</span>
+                          <span style={styles.chip}>Empty {num(l.emptyMiles)}</span>
+                          <span style={styles.chip}>RPM {rpm(l.fee, l.miles)}</span>
+                          <span style={styles.chip}>On‑Time {l.onTime ? "Yes" : "No"}</span>
+                          {deadPct > 20 && <span style={{ ...styles.chip, borderColor: "#ef4444", color: "#ef4444" }}>High Deadhead {deadPct}%</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {legs.length === 0 && <div style={{ color: "#8b93a7" }}>No loads match the filters.</div>}
+                </div>
+              </div>
+            </div>
+
+            {/* MAP */}
+            <div style={{ ...styles.card, position: "relative", height: mapHeight }}>
+              {apiKey ? (isLoaded ? (
+                <GoogleMap onLoad={(m) => (mapRef.current = m)} mapContainerStyle={{ width: "100%", height: "100%" }}
+                  center={{ lat: 36.5, lng: -96.5 }} zoom={5} options={{ streetViewControl: false, mapTypeControl: true, fullscreenControl: true }}>
+                  {showTraffic && <TrafficLayer autoUpdate />}
+                  {endpoints.map((ep, idx) => (
+                    <React.Fragment key={idx}>
+                      <Marker position={ep.start} icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#22c55e", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
+                      <Marker position={ep.end} icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#ef4444", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
+                      <Polyline path={[ep.start, ep.end]} options={{ strokeColor: ep.color, strokeOpacity: 0.9, strokeWeight: 3 }} />
+                      <Marker position={ep.mid} label={{ text: String(idx + 1), color: "#0b0d12", fontWeight: "800" }}
+                        icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: "#D2F000", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
+                    </React.Fragment>
+                  ))}
+                </GoogleMap>
+              ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#8b93a7" }}>Loading Google Maps…</div>)
+              ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#8b93a7" }}>Paste your Google Maps API key to load the map</div>)}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* INSIGHTS TAB */}
+      {tab === "insights" && (
         <div style={{ display: "grid", gap: 12 }}>
           {/* KPIs with Utilization & Deadhead */}
           <div style={{ ...styles.card, padding: 12 }}>
@@ -318,106 +467,6 @@ export default function App() {
                 </div>
               ))}
               {driverInsights.length === 0 && <div style={{ color: "#8b93a7" }}>No data for selected range.</div>}
-            </div>
-          </div>
-        </div>
-      ) : (
-      /* === DASHBOARD TAB (existing layout slimmed to prove patch is live) === */
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 8 }}>
-          {/* Filters row (same as before, shortened to fit patch) */}
-          <div style={{ gridColumn: "span 6" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 8 }}>
-              <div style={{ ...styles.card, padding: 8 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Date from</div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input ref={fromRef} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                        style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-                  <button style={{ padding: "8px 12px", border: "1px solid #232838", borderRadius: 10, color: "#e6e8ee", background: "transparent" }} onClick={() => fromRef.current?.showPicker?.()}>📅</button>
-                </div>
-              </div>
-              <div style={{ ...styles.card, padding: 8 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Date to</div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input ref={toRef} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                        style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-                  <button style={{ padding: "8px 12px", border: "1px solid #232838", borderRadius: 10, color: "#e6e8ee", background: "transparent" }} onClick={() => toRef.current?.showPicker?.()}>📅</button>
-                </div>
-              </div>
-              <div style={{ ...styles.card, padding: 8 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Date basis</div>
-                <select value={basis} onChange={(e) => setBasis(e.target.value)}
-                        style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
-                  <option value="pickup">Pickup (Ship Date)</option>
-                  <option value="delivery">Delivery (Del. Date)</option>
-                </select>
-              </div>
-              <div style={{ ...styles.card, padding: 8 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Route style</div>
-                <select value={routeStyle} onChange={(e) => setRouteStyle(e.target.value)}
-                        style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
-                  <option value="lines">Straight Lines</option>
-                  <option value="driving">Driving Directions</option>
-                </select>
-              </div>
-              <div style={{ ...styles.card, padding: 8 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Traffic</div>
-                <button style={{ padding: "8px 12px", border: "1px solid #232838", borderRadius: 10, color: "#e6e8ee", background: "transparent" }} onClick={() => setShowTraffic(v => !v)}>{showTraffic ? "On" : "Off"}</button>
-              </div>
-              <div style={{ ...styles.card, padding: 8 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Data Source</div>
-                <select value={dataSource} onChange={(e) => setDataSource(e.target.value)}
-                        style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
-                  <option value="upload">Upload</option>
-                  <option value="sheets">Google Sheets</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Simple loads list to confirm patch is live */}
-          <div style={{ gridColumn: "span 3" }}>
-            <div style={{ ...styles.card, padding: 12 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Loads (sample)</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {legs.map((l, i) => (
-                  <div key={i} style={{ border: "1px solid #232838", borderRadius: 10, padding: "8px 10px" }}>
-                    <div style={{ fontWeight: 700 }}>{l.driver} • Load {l.loadNo ?? ""}</div>
-                    <div style={{ fontSize: 12, color: "#8b93a7" }}>{fmt(l.shipDate)} pickup • {fmt(l.delDate)} delivery — {l.originCS} → {l.destCS}</div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-                      <span style={styles.chip}>Rev {money(l.fee)}</span>
-                      <span style={styles.chip}>Mi {num(l.miles)}</span>
-                      <span style={styles.chip}>Loaded {num(l.loadedMiles)}</span>
-                      <span style={styles.chip}>Empty {num(l.emptyMiles)}</span>
-                      <span style={styles.chip}>RPM {rpm(l.fee, l.miles)}</span>
-                      <span style={styles.chip}>On‑Time {l.onTime ? "Yes" : "No"}</span>
-                    </div>
-                  </div>
-                ))}
-                {legs.length === 0 && <div style={{ color: "#8b93a7" }}>No loads match the filters.</div>}
-              </div>
-            </div>
-          </div>
-
-          {/* Map (condensed) */}
-          <div style={{ gridColumn: "span 3" }}>
-            <div style={{ position: "relative", ...styles.card, height: Math.max(420, Math.min(820, 420 + legs.length * 18)) }}>
-              {apiKey ? (isLoaded ? (
-                <GoogleMap onLoad={(m) => (mapRef.current = m)} mapContainerStyle={{ width: "100%", height: "100%" }}
-                  center={{ lat: 36.5, lng: -96.5 }} zoom={5} options={{ streetViewControl: false, mapTypeControl: true, fullscreenControl: true }}>
-                  {showTraffic && <TrafficLayer autoUpdate />}
-                  {endpoints.map((ep, idx) => (
-                    <React.Fragment key={idx}>
-                      <Marker position={ep.start} icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#22c55e", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
-                      <Marker position={ep.end} icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#ef4444", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
-                      <Polyline path={[ep.start, ep.end]} options={{ strokeColor: ep.color, strokeOpacity: 0.9, strokeWeight: 3 }} />
-                      <Marker position={ep.mid} label={{ text: String(idx + 1), color: "#0b0d12", fontWeight: "800" }}
-                        icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: "#D2F000", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
-                    </React.Fragment>
-                  ))}
-                </GoogleMap>
-              ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#8b93a7" }}>Loading Google Maps…</div>)) : (
-                <div style={{ display: "grid", placeItems: "center", height: "100%", color: "#8b93a7" }}>Paste your Google Maps API key to load the map</div>
-              )}
             </div>
           </div>
         </div>
