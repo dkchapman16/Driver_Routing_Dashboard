@@ -218,7 +218,9 @@ export default function App() {
           originCS: originCS(r), destCS: destCS(r),
           loadedMiles: loaded, emptyMiles: empty, miles: total,
           fee: Number(r[COLS.fee] || 0),
-          onTime: !(isLate(r[COLS.shipperArrival]) || isLate(r[COLS.receiverArrival])),
+          onTime: ((r[COLS.shipperArrival] ?? "").toString().trim() || (r[COLS.receiverArrival] ?? "").toString().trim())
+            ? !(isLate(r[COLS.shipperArrival]) || isLate(r[COLS.receiverArrival]))
+            : null,
         };
       })
       .sort((a, b) => {
@@ -236,7 +238,7 @@ export default function App() {
     const miles = Math.round(legs.reduce((a,b)=>a+(b.miles||0),0));
     const revenue = legs.reduce((a,b)=>a+(b.fee||0),0);
     const fleetRPM = miles>0 ? (revenue/miles).toFixed(2) : "0.00";
-    const onBase = legs.filter(l=>l.onTime!==null);
+    const onBase = legs.filter(l => l.onTime !== null);
     const onTime = onBase.length ? Math.round(100*onBase.filter(l=>l.onTime).length/onBase.length) : 0;
     const empty = Math.round(legs.reduce((a,b)=>a+(b.emptyMiles||0),0));
     const deadheadPct = (miles>0) ? Math.round((empty/miles)*100) : 0;
