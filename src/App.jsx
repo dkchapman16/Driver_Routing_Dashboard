@@ -280,16 +280,19 @@ export default function App() {
   useEffect(()=>setMapHeight(Math.max(420, Math.min(820, 420 + legs.length*18))),[legs.length]);
   useEffect(() => {
     if (!isLoaded) return;
+    let cancelled = false;
     const geocoder = new google.maps.Geocoder();
     (async () => {
       const out = [];
       for (const l of legs) {
+        if (cancelled) break;
         if (!l.originFull || !l.destFull) continue;
         try {
           const [o, d] = await Promise.all([
             geocoder.geocode({ address: l.originFull }).then(r=>r.results?.[0]?.geometry?.location),
             geocoder.geocode({ address: l.destFull   }).then(r=>r.results?.[0]?.geometry?.location),
           ]);
+          if (cancelled) break;
           if (o && d) {
             const mid = new google.maps.LatLng((o.lat()+d.lat())/2, (o.lng()+d.lng())/2);
             out.push({ start:o, end:d, mid, color: colorByDriver(l.driver) });
@@ -297,9 +300,10 @@ export default function App() {
         } catch {}
         await new Promise(r=>setTimeout(r,80));
       }
-      setEndpoints(out);
+      if (!cancelled) setEndpoints(out);
     })();
-  }, [isLoaded, JSON.stringify(legs.map(l=>[l.originFull,l.destFull,l.driver]))]);
+    return () => { cancelled = true; };
+  }, [isLoaded, legs]);
 
   useEffect(() => {
     if (!isLoaded || !mapRef.current || !endpoints.length) return;
