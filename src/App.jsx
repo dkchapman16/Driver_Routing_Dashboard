@@ -5,6 +5,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, useJsApiLoader, Polyline, Marker, TrafficLayer } from "@react-google-maps/api";
 import * as XLSX from "xlsx";
+import { LanesTabEnabled } from "./features";
 
 const COLS = {
   driver: "Drivers",
@@ -353,6 +354,9 @@ export default function App() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={styles.tab(tab === "dashboard")} onClick={()=>setTab("dashboard")}>Dashboard</button>
+          {LanesTabEnabled && (
+            <button style={styles.tab(tab === "lanes")} onClick={()=>setTab("lanes")}>Lanes</button>
+          )}
           <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>
             Insights <span style={styles.badgeNew}>NEW</span>
           </button>
@@ -508,6 +512,13 @@ export default function App() {
             ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#a2a9bb" }}>Loading Google Maps…</div>))
             : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#a2a9bb" }}>Paste your Google Maps API key to load the map</div>)}
           </div>
+        </div>
+      )}
+
+      {/* Lanes tab */}
+      {LanesTabEnabled && tab === "lanes" && (
+        <div style={{ ...styles.card, padding: 12 }}>
+          Lanes feature coming soon.
         </div>
       )}
 
