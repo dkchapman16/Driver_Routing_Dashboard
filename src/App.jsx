@@ -169,7 +169,7 @@ export default function App() {
     } catch (e) { alert("Could not load from Google Sheets CSV link. Ensure it's published to the web as CSV and public."); }
   }
 
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTab] = useState("dashboard"); // dashboard | lane | insights
   const drivers = useMemo(() => {
     const s = new Set();
     rows.forEach(r => { const d = (r[COLS.driver] ?? "").toString().trim(); if (d) s.add(d); });
@@ -273,6 +273,20 @@ export default function App() {
     return out.sort((a,b)=>b.revenue - a.revenue);
   }, [legs]);
 
+  const laneInsights = useMemo(() => {
+    const m = new Map();
+    legs.forEach(l => {
+      if (!l.originCS || !l.destCS) return;
+      const key = `${l.originCS} → ${l.destCS}`;
+      if (!m.has(key)) m.set(key, { lane: key, loads: 0, miles: 0, revenue: 0 });
+      const x = m.get(key);
+      x.loads += 1;
+      x.miles += l.miles || 0;
+      x.revenue += l.fee || 0;
+    });
+    return Array.from(m.values()).sort((a,b)=>b.loads - a.loads);
+  }, [legs]);
+
   // Geocode endpoints and draw routes
   const [endpoints, setEndpoints] = useState([]);
   const mapRef = useRef(null);
@@ -346,16 +360,15 @@ export default function App() {
     divider: { width: 6, cursor: "col-resize", background: "#0b0d12", border: "1px solid #232838", borderRadius: 6 },
   };
 
-  const onReset = () => { setSelDrivers([]); setDateFrom(""); setDateTo(""); setBasis("pickup"); setRouteStyle("lines"); setShowTraffic(false); };
+  const onReset = () => { setSelDrivers([]); setDateFrom(""); setDateTo(""); setBasis("pickup"); setRouteStyle("lines"); setShowTraffic(false); setTab("dashboard"); };
 
   return (
     <div style={styles.page}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={styles.tab(tab === "dashboard")} onClick={()=>setTab("dashboard")}>Dashboard</button>
-          <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>
-            Insights <span style={styles.badgeNew}>NEW</span>
-          </button>
+          <button style={styles.tab(tab === "lane")} onClick={()=>setTab("lane")}>Lane</button>
+          <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>Insights <span style={styles.badgeNew}>NEW</span></button>
         </div>
         <button style={styles.btn} onClick={onReset}>Reset</button>
       </div>
@@ -508,6 +521,32 @@ export default function App() {
             ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#a2a9bb" }}>Loading Google Maps…</div>))
             : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#a2a9bb" }}>Paste your Google Maps API key to load the map</div>)}
           </div>
+        </div>
+      )}
+
+      {/* Lane tab */}
+      {tab === "lane" && (
+        <div style={{ ...styles.card, padding: 12 }}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 10 }}>Lane Insights (current filters)</div>
+          {laneInsights.length ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+              {laneInsights.map((l, i) => (
+                <div key={i} style={{ ...styles.card, padding: 12 }}>
+                  <div style={{ fontWeight: 700 }}>{l.lane}</div>
+                  <div style={{ color: "#a2a9bb", fontSize: 12 }}>Loads</div>
+                  <div style={{ fontWeight: 800 }}>{l.loads}</div>
+                  <div style={{ color: "#a2a9bb", fontSize: 12, marginTop: 6 }}>Miles</div>
+                  <div style={{ fontWeight: 800 }}>{num(l.miles)}</div>
+                  <div style={{ color: "#a2a9bb", fontSize: 12, marginTop: 6 }}>Revenue</div>
+                  <div style={{ fontWeight: 800 }}>{money(l.revenue)}</div>
+                  <div style={{ color: "#a2a9bb", fontSize: 12, marginTop: 6 }}>RPM</div>
+                  <div style={{ fontWeight: 800 }}>{rpm(l.revenue, l.miles)}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: "#a2a9bb" }}>No data for selected range.</div>
+          )}
         </div>
       )}
 
