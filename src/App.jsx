@@ -281,25 +281,38 @@ export default function App() {
   useEffect(() => {
     if (!isLoaded) return;
     const geocoder = new google.maps.Geocoder();
+    let cancelled = false;
     (async () => {
       const out = [];
       for (const l of legs) {
+        if (cancelled) break;
         if (!l.originFull || !l.destFull) continue;
         try {
           const [o, d] = await Promise.all([
-            geocoder.geocode({ address: l.originFull }).then(r=>r.results?.[0]?.geometry?.location),
-            geocoder.geocode({ address: l.destFull   }).then(r=>r.results?.[0]?.geometry?.location),
+            geocoder
+              .geocode({ address: l.originFull })
+              .then((r) => r.results?.[0]?.geometry?.location),
+            geocoder
+              .geocode({ address: l.destFull })
+              .then((r) => r.results?.[0]?.geometry?.location),
           ]);
+          if (cancelled) break;
           if (o && d) {
-            const mid = new google.maps.LatLng((o.lat()+d.lat())/2, (o.lng()+d.lng())/2);
-            out.push({ start:o, end:d, mid, color: colorByDriver(l.driver) });
+            const mid = new google.maps.LatLng(
+              (o.lat() + d.lat()) / 2,
+              (o.lng() + d.lng()) / 2
+            );
+            out.push({ start: o, end: d, mid, color: colorByDriver(l.driver) });
           }
         } catch {}
-        await new Promise(r=>setTimeout(r,80));
+        await new Promise((r) => setTimeout(r, 80));
       }
-      setEndpoints(out);
+      if (!cancelled) setEndpoints(out);
     })();
-  }, [isLoaded, JSON.stringify(legs.map(l=>[l.originFull,l.destFull,l.driver]))]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, legs]);
 
   useEffect(() => {
     if (!isLoaded || !mapRef.current || !endpoints.length) return;
