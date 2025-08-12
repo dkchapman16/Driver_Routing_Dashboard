@@ -57,7 +57,6 @@ const inRangeByDayKey = (dayKey, from, to) => {
   const end   = to   || "9999-12-31";
   return dayKey >= start && dayKey <= end;
 };
-const toDayKey = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x.toISOString().slice(0,10); };
 const daysBetween = (start, end) => {
   const out = [];
   if (!start || !end) return out;
