@@ -1,4 +1,3 @@
-
 // v2.1.6 — Hotfix (complete)
 // - Restores route drawing (geocoding), Insights tab, calendar buttons
 // - Restores draggable divider to resize list vs map
@@ -28,15 +27,24 @@ const COLS = {
   receiverArrival: "Receiver Arrival Status",
 };
 
+// Convert Excel serial date or string date into a JavaScript Date object.
+// The previous implementation constructed Date objects in the local timezone
+// which could yield off‑by‑one results for users outside UTC when the string
+// was parsed as UTC. By explicitly using UTC for serial numbers and parsing
+// string dates as local midnight, we avoid unintended timezone shifts.
 const excelToDate = (v) => {
   if (v === null || v === undefined || v === "") return null;
   if (typeof v === "number") {
-    const base = new Date(1899, 11, 30);
-    return new Date(base.getTime() + v * 86400000);
+    // Excel serial dates are based on 1899‑12‑30; treat them as UTC to avoid
+    // local timezone offsets influencing the result.
+    const base = Date.UTC(1899, 11, 30);
+    return new Date(base + v * 86400000);
   }
   const onlyDate = String(v).split(" ")[0];
-  const d = new Date(onlyDate);
-  return isNaN(+d) ? null : d;
+  // Parse string dates as local time by appending a time component so they are
+  // not interpreted as UTC. This prevents a potential one‑day shift.
+  const d = new Date(`${onlyDate}T00:00:00`);
+  return isNaN(d.getTime()) ? null : d;
 };
 const isCanceled = (s) => s && /cancel+ed|cancelled|canceled/i.test(String(s));
 const isLate = (s) => s && /late/i.test(String(s));
@@ -71,7 +79,7 @@ function DriverPicker({ drivers, selDrivers, setSelDrivers }) {
   const [q, setQ] = useState("");
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return drivers;
+       if (!needle) return drivers;
     return drivers.filter(d => d.toLowerCase().includes(needle));
   }, [drivers, q]);
 
@@ -529,3 +537,4 @@ export default function App() {
     </div>
   );
 }
+
