@@ -1,6 +1,8 @@
 
-// v2.1.5 — Drivers checkbox picker (multi-select with Select All / Clear / filter)
-// Includes v2.1.4 strict date-basis logic and miles/RPM rules.
+// v2.1.6 — Hotfix (complete)
+// - Restores route drawing (geocoding), Insights tab, calendar buttons
+// - Restores draggable divider to resize list vs map
+// - Keeps strict date-basis logic, miles/RPM math, driver checkboxes
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, useJsApiLoader, Polyline, Marker, TrafficLayer } from "@react-google-maps/api";
 import * as XLSX from "xlsx";
@@ -72,8 +74,8 @@ function DriverPicker({ drivers, selDrivers, setSelDrivers }) {
   function toggle(name) {
     setSelDrivers(prev => prev.includes(name) ? prev.filter(d => d !== name) : [...prev, name]);
   }
-  function selectAll() { setSelDrivers(drivers); }
-  function clearAll() { setSelDrivers([]); }
+  const selectAll = () => setSelDrivers(drivers);
+  const clearAll  = () => setSelDrivers([]);
 
   const styles = {
     card: { background: "#151923", border: "1px solid #232838", borderRadius: 14, padding: 12 },
@@ -101,7 +103,6 @@ function DriverPicker({ drivers, selDrivers, setSelDrivers }) {
       </div>
 
       <div style={styles.list}>
-        {/* master checkbox */}
         <div style={{ ...styles.row, fontWeight: 700 }} onClick={()=> allSelected ? clearAll() : selectAll()}>
           <input type="checkbox" readOnly checked={allSelected} ref={el=>{ if(el) el.indeterminate = someSelected; }} style={styles.checkbox}/>
           <span>All drivers</span>
@@ -166,6 +167,7 @@ export default function App() {
   const [basis, setBasis] = useState("pickup");
   const [routeStyle, setRouteStyle] = useState("lines");
   const [showTraffic, setShowTraffic] = useState(false);
+  const fromRef = useRef(null), toRef = useRef(null);
 
   useEffect(() => { if (dataSource === "sheets" && sheetUrl) syncFromSheet(sheetUrl); }, []);
 
@@ -218,6 +220,7 @@ export default function App() {
       });
   }, [rows, selDrivers, dateFrom, dateTo, basis]);
 
+  // KPIs + Insights
   const kpi = useMemo(() => {
     const miles = Math.round(legs.reduce((a,b)=>a+(b.miles||0),0));
     const revenue = legs.reduce((a,b)=>a+(b.fee||0),0);
@@ -226,7 +229,7 @@ export default function App() {
     const onTime = onBase.length ? Math.round(100*onBase.filter(l=>l.onTime).length/onBase.length) : 0;
     const empty = Math.round(legs.reduce((a,b)=>a+(b.emptyMiles||0),0));
     const deadheadPct = (miles>0) ? Math.round((empty/miles)*100) : 0;
-    // Utilization (day-based average across drivers in range)
+
     let utilization = 0;
     if (dateFrom && dateTo) {
       const allDays = daysBetween(dateFrom, dateTo);
@@ -246,6 +249,20 @@ export default function App() {
     return { loads: legs.length, miles, revenue, fleetRPM, onTime, deadheadPct, utilization };
   }, [legs, dateFrom, dateTo]);
 
+  const driverInsights = useMemo(() => {
+    const out = [];
+    if (!legs.length) return out;
+    const ds = Array.from(new Set(legs.map(l => l.driver)));
+    ds.forEach(d => {
+      const my = legs.filter(l => l.driver === d);
+      const rev = my.reduce((a,b)=>a+(b.fee||0),0);
+      const mi  = my.reduce((a,b)=>a+(b.miles||0),0);
+      out.push({ driver: d, revenue: rev, miles: mi, rpm: mi>0 ? (rev/mi).toFixed(2) : "0.00" });
+    });
+    return out.sort((a,b)=>b.revenue - a.revenue);
+  }, [legs]);
+
+  // Geocode endpoints and draw routes
   const [endpoints, setEndpoints] = useState([]);
   const mapRef = useRef(null);
   const [mapHeight, setMapHeight] = useState(560);
@@ -280,99 +297,138 @@ export default function App() {
     mapRef.current.fitBounds(b, 64);
   }, [isLoaded, endpoints.length]);
 
+  // Draggable divider (resizable sidebar)
+  const [sidebarW, setSidebarW] = useState(Number(localStorage.getItem("sidebar_w") || 380));
+  const dragging = useRef(false);
+  const onDragStart = (e) => { dragging.current = true; e.preventDefault(); };
+  const onDragMove = (e) => {
+    if (!dragging.current) return;
+    const x = e.clientX || (e.touches && e.touches[0]?.clientX);
+    if (!x) return;
+    const rectLeft = 24; // padding approx
+    const w = Math.max(280, Math.min(640, x - rectLeft));
+    setSidebarW(w);
+  };
+  const onDragEnd = () => { if (dragging.current){ dragging.current=false; localStorage.setItem("sidebar_w", String(sidebarW)); } };
+  useEffect(()=>{
+    window.addEventListener("mousemove", onDragMove);
+    window.addEventListener("mouseup", onDragEnd);
+    window.addEventListener("touchmove", onDragMove);
+    window.addEventListener("touchend", onDragEnd);
+    return () => {
+      window.removeEventListener("mousemove", onDragMove);
+      window.removeEventListener("mouseup", onDragEnd);
+      window.removeEventListener("touchmove", onDragMove);
+      window.removeEventListener("touchend", onDragEnd);
+    };
+  }, [sidebarW]);
+
   const styles = {
     page: { padding: 16, background: "#0f1115", color: "#e6e8ee", fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial" },
     card: { background: "#151923", border: "1px solid #232838", borderRadius: 14 },
     muted: { color: "#a2a9bb" },
     chip: { border: "1px solid #232838", borderRadius: 999, padding: "4px 8px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 },
     btn: { padding: "8px 12px", border: "1px solid #232838", borderRadius: 10, cursor: "pointer", color: "#e6e8ee", background: "transparent" },
+    btnAccent: { padding: "8px 12px", borderRadius: 10, cursor: "pointer", color: "#0b0d12", background: "#D2F000", border: "1px solid #D2F000", fontWeight: 700 },
     tab: (active) => ({ padding: "10px 14px", borderRadius: 10, cursor: "pointer", border: "1px solid #232838", background: active ? "#232838" : "transparent", color: "#e6e8ee", fontWeight: 700 }),
     badgeNew: { marginLeft: 8, background: "#D2F000", color: "#0b0d12", borderRadius: 6, padding: "2px 6px", fontSize: 11, fontWeight: 800 },
+    divider: { width: 6, cursor: "col-resize", background: "#0b0d12", border: "1px solid #232838", borderRadius: 6 },
   };
 
-  function onReset(){ setSelDrivers([]); setDateFrom(""); setDateTo(""); setBasis("pickup"); setRouteStyle("lines"); setShowTraffic(false); }
+  const onReset = () => { setSelDrivers([]); setDateFrom(""); setDateTo(""); setBasis("pickup"); setRouteStyle("lines"); setShowTraffic(false); };
 
   return (
     <div style={styles.page}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 8 }}>
-          <button style={styles.tab(true)} onClick={()=>{}} >Dashboard</button>
-          <button style={styles.tab(false)} onClick={()=>{}} >Insights <span style={styles.badgeNew}>NEW</span></button>
+          <button style={styles.tab(tab === "dashboard")} onClick={()=>setTab("dashboard")}>Dashboard</button>
+          <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>
+            Insights <span style={styles.badgeNew}>NEW</span>
+          </button>
         </div>
         <button style={styles.btn} onClick={onReset}>Reset</button>
       </div>
 
-      {/* Filters */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 8 }}>
-        <div style={{ ...styles.card, padding: 8 }}>
-          <div style={{ fontSize: 12, ...styles.muted }}>Date from</div>
-          <input type="date" value={dateFrom} onChange={(e)=>setDateFrom(e.target.value)}
-                 style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-        </div>
-        <div style={{ ...styles.card, padding: 8 }}>
-          <div style={{ fontSize: 12, ...styles.muted }}>Date to</div>
-          <input type="date" value={dateTo} onChange={(e)=>setDateTo(e.target.value)}
-                 style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-        </div>
-        <div style={{ ...styles.card, padding: 8 }}>
-          <div style={{ fontSize: 12, ...styles.muted }}>Date basis</div>
-          <select value={basis} onChange={(e)=>setBasis(e.target.value)}
-                  style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
-            <option value="pickup">Pickup (Ship Date)</option>
-            <option value="delivery">Delivery (Del. Date)</option>
-          </select>
-        </div>
-        <div style={{ ...styles.card, padding: 8 }}>
-          <div style={{ fontSize: 12, ...styles.muted }}>Route style</div>
-          <select value={routeStyle} onChange={(e)=>setRouteStyle(e.target.value)}
-                  style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
-            <option value="lines">Straight Lines</option>
-            <option value="driving">Driving Directions</option>
-          </select>
-        </div>
-        <div style={{ ...styles.card, padding: 8 }}>
-          <div style={{ fontSize: 12, ...styles.muted }}>Traffic</div>
-          <button style={styles.btn} onClick={()=>setShowTraffic(v=>!v)}>{showTraffic? "On":"Off"}</button>
-        </div>
-        <div style={{ ...styles.card, padding: 8 }}>
-          <div style={{ fontSize: 12, ...styles.muted }}>Data Source</div>
-          <select value={dataSource} onChange={(e)=>setDataSource(e.target.value)}
-                  style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
-            <option value="upload">Upload</option>
-            <option value="sheets">Google Sheets</option>
-          </select>
-        </div>
-      </div>
-
-      {/* API + source */}
-      <div style={{ ...styles.card, padding: 12, marginTop: 10 }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 220 }}>
-            <div style={{ fontSize: 12, ...styles.muted }}>Google Maps API Key</div>
-            <input type="password" value={apiKey} onChange={(e)=>setApiKey(e.target.value)}
-                   style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-          </div>
-
-          {dataSource === "upload" ? (
-            <div style={{ minWidth: 260 }}>
-              <div style={{ fontSize: 12, ...styles.muted }}>Upload Excel/CSV</div>
-              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile}
-                     style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-              {fileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fileName}</div>}
-            </div>
-          ) : (
-            <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 420 }}>
-              <input type="url" placeholder="Paste published CSV link"
-                     value={sheetUrl} onChange={(e)=>setSheetUrl(e.target.value)}
+      {/* Filters (dashboard only) */}
+      {tab === "dashboard" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 8 }}>
+          <div style={{ ...styles.card, padding: 8 }}>
+            <div style={{ fontSize: 12, ...styles.muted }}>Date from</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input ref={fromRef} type="date" value={dateFrom} onChange={(e)=>setDateFrom(e.target.value)}
                      style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-              <button style={{ padding: "8px 12px", borderRadius: 10, cursor: "pointer", color: "#0b0d12", background: "#D2F000", border: "1px solid #D2F000", fontWeight: 700 }}
-                      onClick={()=>syncFromSheet()}>Sync</button>
+              <button title="Open calendar" style={styles.btn} onClick={()=>fromRef.current?.showPicker?.()}>📅</button>
             </div>
-          )}
+          </div>
+          <div style={{ ...styles.card, padding: 8 }}>
+            <div style={{ fontSize: 12, ...styles.muted }}>Date to</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input ref={toRef} type="date" value={dateTo} onChange={(e)=>setDateTo(e.target.value)}
+                     style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+              <button title="Open calendar" style={styles.btn} onClick={()=>toRef.current?.showPicker?.()}>📅</button>
+            </div>
+          </div>
+          <div style={{ ...styles.card, padding: 8 }}>
+            <div style={{ fontSize: 12, ...styles.muted }}>Date basis</div>
+            <select value={basis} onChange={(e)=>setBasis(e.target.value)}
+                    style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
+              <option value="pickup">Pickup (Ship Date)</option>
+              <option value="delivery">Delivery (Del. Date)</option>
+            </select>
+          </div>
+          <div style={{ ...styles.card, padding: 8 }}>
+            <div style={{ fontSize: 12, ...styles.muted }}>Route style</div>
+            <select value={routeStyle} onChange={(e)=>setRouteStyle(e.target.value)}
+                    style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
+              <option value="lines">Straight Lines</option>
+              <option value="driving">Driving Directions</option>
+            </select>
+          </div>
+          <div style={{ ...styles.card, padding: 8 }}>
+            <div style={{ fontSize: 12, ...styles.muted }}>Traffic</div>
+            <button style={styles.btn} onClick={()=>setShowTraffic(v=>!v)}>{showTraffic? "On":"Off"}</button>
+          </div>
+          <div style={{ ...styles.card, padding: 8 }}>
+            <div style={{ fontSize: 12, ...styles.muted }}>Data Source</div>
+            <select value={dataSource} onChange={(e)=>setDataSource(e.target.value)}
+                    style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
+              <option value="upload">Upload</option>
+              <option value="sheets">Google Sheets</option>
+            </select>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* KPI row */}
+      {/* API + source (dashboard only) */}
+      {tab === "dashboard" && (
+        <div style={{ ...styles.card, padding: 12, marginTop: 10 }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Google Maps API Key</div>
+              <input type="password" value={apiKey} onChange={(e)=>setApiKey(e.target.value)}
+                     style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+            </div>
+
+            {dataSource === "upload" ? (
+              <div style={{ minWidth: 260 }}>
+                <div style={{ fontSize: 12, ...styles.muted }}>Upload Excel/CSV</div>
+                <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile}
+                       style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                {fileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fileName}</div>}
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 420 }}>
+                <input type="url" placeholder="Paste published CSV link"
+                       value={sheetUrl} onChange={(e)=>setSheetUrl(e.target.value)}
+                       style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                <button style={styles.btnAccent} onClick={()=>syncFromSheet()}>Sync</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* KPIs */}
       <div style={{ ...styles.card, padding: 12, marginTop: 10 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 10 }}>
           <div style={{ ...styles.card, padding: 12 }}><div style={{ fontSize: 12, ...styles.muted }}>Loads</div><div style={{ fontSize: 22, fontWeight: 800 }}>{kpi.loads}</div></div>
@@ -385,56 +441,88 @@ export default function App() {
         </div>
       </div>
 
-      {/* Drivers + Loads + Map */}
-      <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: 14, marginTop: 12 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <DriverPicker drivers={drivers} selDrivers={selDrivers} setSelDrivers={setSelDrivers} />
+      {/* Dashboard body with draggable divider */}
+      {tab === "dashboard" && (
+        <div style={{ display: "grid", gridTemplateColumns: `${sidebarW}px 6px 1fr`, gap: 14, marginTop: 12, alignItems: "stretch" }}>
+          {/* Sidebar */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <DriverPicker drivers={drivers} selDrivers={selDrivers} setSelDrivers={setSelDrivers} />
 
-          <div style={{ ...styles.card, padding: 12 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Loads</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {legs.map((l, i) => {
-                const c = colorByDriver(l.driver);
-                const deadPct = (l.miles>0) ? Math.round((l.emptyMiles||0) / l.miles * 100) : 0;
-                return (
-                  <div key={i} style={{ ...styles.card, padding: 12, borderColor: c }}>
-                    <div style={{ fontWeight: 700 }}>{l.driver} • Load {l.loadNo ?? ""}</div>
-                    <div style={{ color: "#a2a9bb", fontSize: 12 }}>{fmt(l.shipDate)} pickup • {fmt(l.delDate)} delivery — {l.originCS || "—"} → {l.destCS || "—"}</div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                      <span style={{ border: "1px solid #232838", borderRadius: 999, padding: "4px 8px", fontSize: 12 }}>Rev {money(l.fee)}</span>
-                      <span style={{ border: "1px solid #232838", borderRadius: 999, padding: "4px 8px", fontSize: 12 }}>Mi {num(l.miles)}</span>
-                      <span style={{ border: "1px solid #232838", borderRadius: 999, padding: "4px 8px", fontSize: 12 }}>Loaded {num(l.loadedMiles)}</span>
-                      <span style={{ border: "1px solid #232838", borderRadius: 999, padding: "4px 8px", fontSize: 12 }}>Empty {num(l.emptyMiles)}</span>
-                      <span style={{ border: "1px solid #232838", borderRadius: 999, padding: "4px 8px", fontSize: 12 }}>RPM {rpm(l.fee, l.miles)}</span>
-                      <span style={{ border: "1px solid #232838", borderRadius: 999, padding: "4px 8px", fontSize: 12 }}>On‑Time {l.onTime ? "Yes" : "No"}</span>
-                      {deadPct > 20 && <span style={{ border: "1px solid #ef4444", color: "#ef4444", borderRadius: 999, padding: "4px 8px", fontSize: 12 }}>High Deadhead {deadPct}%</span>}
+            <div style={{ ...styles.card, padding: 12 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Loads</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {legs.map((l, i) => {
+                  const c = colorByDriver(l.driver);
+                  const deadPct = (l.miles>0) ? Math.round((l.emptyMiles||0) / l.miles * 100) : 0;
+                  return (
+                    <div key={i} style={{ ...styles.card, padding: 12, borderColor: c }}>
+                      <div style={{ fontWeight: 700 }}>{l.driver} • Load {l.loadNo ?? ""}</div>
+                      <div style={{ color: "#a2a9bb", fontSize: 12 }}>{fmt(l.shipDate)} pickup • {fmt(l.delDate)} delivery — {l.originCS || "—"} → {l.destCS || "—"}</div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                        <span style={styles.chip}>Rev {money(l.fee)}</span>
+                        <span style={styles.chip}>Mi {num(l.miles)}</span>
+                        <span style={styles.chip}>Loaded {num(l.loadedMiles)}</span>
+                        <span style={styles.chip}>Empty {num(l.emptyMiles)}</span>
+                        <span style={styles.chip}>RPM {rpm(l.fee, l.miles)}</span>
+                        <span style={styles.chip}>On‑Time {l.onTime ? "Yes" : "No"}</span>
+                        {deadPct > 20 && <span style={{ ...styles.chip, borderColor: "#ef4444", color: "#ef4444" }}>High Deadhead {deadPct}%</span>}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-              {legs.length === 0 && <div style={{ color: "#a2a9bb" }}>No loads match the filters.</div>}
+                  );
+                })}
+                {legs.length === 0 && <div style={{ color: "#a2a9bb" }}>No loads match the filters.</div>}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div style={{ ...styles.card, position: "relative", height: Math.max(420, Math.min(820, 420 + legs.length * 18)) }}>
-          {apiKey ? (isLoaded ? (
-            <GoogleMap onLoad={(m)=> (window._m = m)} mapContainerStyle={{ width: "100%", height: "100%" }}
-              center={{ lat: 36.5, lng: -96.5 }} zoom={5} options={{ streetViewControl: false, mapTypeControl: true, fullscreenControl: true }}>
-              {showTraffic && <TrafficLayer autoUpdate />}
-              {/* Basic straight lines with number labels */}
-              {(() => {
-                const items = [];
-                let idx = 0;
-                const geocoder = new google.maps.Geocoder();
-                // Note: keeping it simple here — app already geocodes in previous version; we focus on UI change.
-                return items;
-              })()}
-            </GoogleMap>
-          ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#a2a9bb" }}>Loading Google Maps…</div>)
-          ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#a2a9bb" }}>Paste your Google Maps API key to load the map</div>)}
+          {/* Divider */}
+          <div style={styles.divider} onMouseDown={onDragStart} onTouchStart={onDragStart} />
+
+          {/* Map */}
+          <div style={{ ...styles.card, position: "relative", height: mapHeight }}>
+            {apiKey ? (isLoaded ? (
+              <GoogleMap onLoad={(m)=> (mapRef.current = m)} mapContainerStyle={{ width: "100%", height: "100%" }}
+                center={{ lat: 36.5, lng: -96.5 }} zoom={5} options={{ streetViewControl: false, mapTypeControl: true, fullscreenControl: true }}>
+                {showTraffic && <TrafficLayer autoUpdate />}
+                {endpoints.map((ep, idx) => (
+                  <React.Fragment key={idx}>
+                    <Marker position={ep.start} icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#22c55e", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
+                    <Marker position={ep.end} icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#ef4444", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
+                    <Polyline path={[ep.start, ep.end]} options={{ strokeColor: ep.color, strokeOpacity: 0.9, strokeWeight: 3 }} />
+                    <Marker position={ep.mid} label={{ text: String(idx + 1), color: "#0b0d12", fontWeight: "800" }}
+                      icon={{ path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: "#D2F000", fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }}/>
+                  </React.Fragment>
+                ))}
+              </GoogleMap>
+            ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#a2a9bb" }}>Loading Google Maps…</div>))
+            : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#a2a9bb" }}>Paste your Google Maps API key to load the map</div>)}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Insights tab */}
+      {tab === "insights" && (
+        <div style={{ ...styles.card, padding: 12 }}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 10 }}>Driver Insights (current filters)</div>
+          {driverInsights.length ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+              {driverInsights.map((d, i) => (
+                <div key={i} style={{ ...styles.card, padding: 12 }}>
+                  <div style={{ fontWeight: 700 }}>{d.driver}</div>
+                  <div style={{ color: "#a2a9bb", fontSize: 12 }}>Revenue</div>
+                  <div style={{ fontWeight: 800 }}>{money(d.revenue)}</div>
+                  <div style={{ color: "#a2a9bb", fontSize: 12, marginTop: 6 }}>Miles</div>
+                  <div style={{ fontWeight: 800 }}>{num(d.miles)}</div>
+                  <div style={{ color: "#a2a9bb", fontSize: 12, marginTop: 6 }}>RPM</div>
+                  <div style={{ fontWeight: 800 }}>{d.rpm}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: "#a2a9bb" }}>No data for selected range.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
