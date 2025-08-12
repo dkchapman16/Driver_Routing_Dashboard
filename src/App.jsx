@@ -5,6 +5,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, useJsApiLoader, Polyline, Marker, TrafficLayer } from "@react-google-maps/api";
 import * as XLSX from "xlsx";
+import { excelToDate } from "./utils/excelToDate.js";
 
 const COLS = {
   driver: "Drivers",
@@ -27,25 +28,6 @@ const COLS = {
   receiverArrival: "Receiver Arrival Status",
 };
 
-// Convert Excel serial date or string date into a JavaScript Date object.
-// The previous implementation constructed Date objects in the local timezone
-// which could yield off‑by‑one results for users outside UTC when the string
-// was parsed as UTC. By explicitly using UTC for serial numbers and parsing
-// string dates as local midnight, we avoid unintended timezone shifts.
-const excelToDate = (v) => {
-  if (v === null || v === undefined || v === "") return null;
-  if (typeof v === "number") {
-    // Excel serial dates are based on 1899‑12‑30; treat them as UTC to avoid
-    // local timezone offsets influencing the result.
-    const base = Date.UTC(1899, 11, 30);
-    return new Date(base + v * 86400000);
-  }
-  const onlyDate = String(v).split(" ")[0];
-  // Parse string dates as local time by appending a time component so they are
-  // not interpreted as UTC. This prevents a potential one‑day shift.
-  const d = new Date(`${onlyDate}T00:00:00`);
-  return isNaN(d.getTime()) ? null : d;
-};
 const isCanceled = (s) => s && /cancel+ed|cancelled|canceled/i.test(String(s));
 const isLate = (s) => s && /late/i.test(String(s));
 const money = (n) => (isFinite(n) ? n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 }) : "$0");
