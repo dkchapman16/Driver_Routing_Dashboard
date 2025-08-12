@@ -6,7 +6,7 @@ Visual & UX
 
 Data & Logic
 - Revenue from **Hauling Fee**; **RPM = Hauling Fee / Miles**.
-- Sorted by **Ship Date** (fallback Delivery).
+- Sorted by **Ship Date** (fallback to Delivery).
 - Date filter basis: **Pickup** or **Delivery**.
 - On‑Time when neither Shipper nor Receiver arrival contains “late”.
 - Canceled loads excluded.
