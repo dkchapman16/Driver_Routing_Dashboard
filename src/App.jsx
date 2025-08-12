@@ -338,10 +338,8 @@ export default function App() {
     page: { padding: 16, background: "#0f1115", color: "#e6e8ee", fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial" },
     card: { background: "#151923", border: "1px solid #232838", borderRadius: 14 },
     muted: { color: "#a2a9bb" },
-    chip: { border: "1px solid #232838", borderRadius: 999, padding: "4px 8px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 },
     btn: { padding: "8px 12px", border: "1px solid #232838", borderRadius: 10, cursor: "pointer", color: "#e6e8ee", background: "transparent" },
     btnAccent: { padding: "8px 12px", borderRadius: 10, cursor: "pointer", color: "#0b0d12", background: "#D2F000", border: "1px solid #D2F000", fontWeight: 700 },
-    tab: (active) => ({ padding: "10px 14px", borderRadius: 10, cursor: "pointer", border: "1px solid #232838", background: active ? "#232838" : "transparent", color: "#e6e8ee", fontWeight: 700 }),
     badgeNew: { marginLeft: 8, background: "#D2F000", color: "#0b0d12", borderRadius: 6, padding: "2px 6px", fontSize: 11, fontWeight: 800 },
     divider: { width: 6, cursor: "col-resize", background: "#0b0d12", border: "1px solid #232838", borderRadius: 6 },
   };
@@ -351,9 +349,9 @@ export default function App() {
   return (
     <div style={styles.page}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button style={styles.tab(tab === "dashboard")} onClick={()=>setTab("dashboard")}>Dashboard</button>
-          <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>
+        <div className="tabs">
+          <button className={`tab${tab === "dashboard" ? " active" : ""}`} onClick={()=>setTab("dashboard")}>Dashboard</button>
+          <button className={`tab${tab === "insights" ? " active" : ""}`} onClick={()=>setTab("insights")}>
             Insights <span style={styles.badgeNew}>NEW</span>
           </button>
         </div>
@@ -466,17 +464,17 @@ export default function App() {
                   const c = colorByDriver(l.driver);
                   const deadPct = (l.miles>0) ? Math.round((l.emptyMiles||0) / l.miles * 100) : 0;
                   return (
-                    <div key={i} style={{ ...styles.card, padding: 12, borderColor: c }}>
-                      <div style={{ fontWeight: 700 }}>{l.driver} • Load {l.loadNo ?? ""}</div>
-                      <div style={{ color: "#a2a9bb", fontSize: 12 }}>{fmt(l.shipDate)} pickup • {fmt(l.delDate)} delivery — {l.originCS || "—"} → {l.destCS || "—"}</div>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                        <span style={styles.chip}>Rev {money(l.fee)}</span>
-                        <span style={styles.chip}>Mi {num(l.miles)}</span>
-                        <span style={styles.chip}>Loaded {num(l.loadedMiles)}</span>
-                        <span style={styles.chip}>Empty {num(l.emptyMiles)}</span>
-                        <span style={styles.chip}>RPM {rpm(l.fee, l.miles)}</span>
-                        <span style={styles.chip}>On‑Time {l.onTime ? "Yes" : "No"}</span>
-                        {deadPct > 20 && <span style={{ ...styles.chip, borderColor: "#ef4444", color: "#ef4444" }}>High Deadhead {deadPct}%</span>}
+                    <div key={i} className="lane-card card" style={{ borderColor: c }}>
+                      <div className="lane-title">{l.driver} • Load {l.loadNo ?? ""}</div>
+                      <div className="lane-sub">{fmt(l.shipDate)} pickup • {fmt(l.delDate)} delivery — {l.originCS || "—"} → {l.destCS || "—"}</div>
+                      <div className="lane-chips">
+                        <span className="chip">Rev {money(l.fee)}</span>
+                        <span className="chip">Mi {num(l.miles)}</span>
+                        <span className="chip">Loaded {num(l.loadedMiles)}</span>
+                        <span className="chip">Empty {num(l.emptyMiles)}</span>
+                        <span className="chip">RPM {rpm(l.fee, l.miles)}</span>
+                        <span className="chip">On‑Time {l.onTime ? "Yes" : "No"}</span>
+                        {deadPct > 20 && <span className="chip chip-alert">High Deadhead {deadPct}%</span>}
                       </div>
                     </div>
                   );
