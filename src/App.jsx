@@ -268,27 +268,32 @@ export default function App() {
   const [mapHeight, setMapHeight] = useState(560);
   useEffect(()=>setMapHeight(Math.max(420, Math.min(820, 420 + legs.length*18))),[legs.length]);
   useEffect(() => {
-    if (!isLoaded) return;
-    const geocoder = new google.maps.Geocoder();
-    (async () => {
-      const out = [];
-      for (const l of legs) {
-        if (!l.originFull || !l.destFull) continue;
-        try {
-          const [o, d] = await Promise.all([
-            geocoder.geocode({ address: l.originFull }).then(r=>r.results?.[0]?.geometry?.location),
-            geocoder.geocode({ address: l.destFull   }).then(r=>r.results?.[0]?.geometry?.location),
-          ]);
-          if (o && d) {
-            const mid = new google.maps.LatLng((o.lat()+d.lat())/2, (o.lng()+d.lng())/2);
-            out.push({ start:o, end:d, mid, color: colorByDriver(l.driver) });
-          }
-        } catch {}
-        await new Promise(r=>setTimeout(r,80));
-      }
-      setEndpoints(out);
-    })();
-  }, [isLoaded, JSON.stringify(legs.map(l=>[l.originFull,l.destFull,l.driver]))]);
+  if (!isLoaded) return;
+  let alive = true;                 // cancel token to prevent races
+  setEndpoints([]);                 // clear immediately on filter change
+  const geocoder = new google.maps.Geocoder();
+  (async () => {
+    const out = [];
+    for (const l of legs) {
+      if (!alive) break;
+      if (!l.originFull || !l.destFull) continue;
+      try {
+        const [o, d] = await Promise.all([
+          geocoder.geocode({ address: l.originFull }).then(r=>r.results?.[0]?.geometry?.location),
+          geocoder.geocode({ address: l.destFull   }).then(r=>r.results?.[0]?.geometry?.location),
+        ]);
+        if (!alive) break;
+        if (o && d) {
+          const mid = new google.maps.LatLng((o.lat()+d.lat())/2, (o.lng()+d.lng())/2);
+          out.push({ start:o, end:d, mid, color: colorByDriver(l.driver) });
+        }
+      } catch {}
+      await new Promise(r=>setTimeout(r,60)); // slight throttle
+    }
+    if (alive) setEndpoints(out);
+  })();
+  return () => { alive = false; };
+}, [isLoaded, JSON.stringify(legs.map(l=>[l.originFull,l.destFull,l.driver]))]);
 
   useEffect(() => {
     if (!isLoaded || !mapRef.current || !endpoints.length) return;
