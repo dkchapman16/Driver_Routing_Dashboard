@@ -5,6 +5,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, useJsApiLoader, Polyline, Marker, TrafficLayer } from "@react-google-maps/api";
 import * as XLSX from "xlsx";
+import LanesTab from "./features/lanes/LanesTab";
 
 const COLS = {
   driver: "Drivers",
@@ -58,6 +59,7 @@ const colorByDriver = (key) => {
 };
 const fmt = (d) => (d ? d.toLocaleDateString() : "—");
 const toDayKey = (d) => { if (!d) return null; const x = new Date(d); x.setHours(0,0,0,0); return x.toISOString().slice(0,10); };
+const features = { lanesView: true };
 const inRangeByDayKey = (dayKey, from, to) => {
   if (!from && !to) return !!dayKey;
   if (!dayKey) return false;
@@ -356,6 +358,9 @@ export default function App() {
           <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>
             Insights <span style={styles.badgeNew}>NEW</span>
           </button>
+          {features.lanesView && (
+            <button style={styles.tab(tab === "lanes")} onClick={()=>setTab("lanes")}>Lanes</button>
+          )}
         </div>
         <button style={styles.btn} onClick={onReset}>Reset</button>
       </div>
@@ -533,6 +538,9 @@ export default function App() {
             <div style={{ color: "#a2a9bb" }}>No data for selected range.</div>
           )}
         </div>
+      )}
+      {features.lanesView && tab === "lanes" && (
+        <LanesTab />
       )}
     </div>
   );
