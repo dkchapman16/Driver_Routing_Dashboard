@@ -1,4 +1,4 @@
-// v2.1.6 — Hotfix (complete)
+// v2.1.8 — Date-basis patch (complete)
 // - Restores route drawing (geocoding), Insights tab, calendar buttons
 // - Restores draggable divider to resize list vs map
 // - Keeps strict date-basis logic, miles/RPM math, driver checkboxes
