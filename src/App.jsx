@@ -5,6 +5,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, useJsApiLoader, Polyline, Marker, TrafficLayer } from "@react-google-maps/api";
 import * as XLSX from "xlsx";
+import FinancialsTab from '@/features/financials/FinancialsTab';
+import { features } from '@/features';
 
 const COLS = {
   driver: "Drivers",
@@ -356,6 +358,9 @@ export default function App() {
           <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>
             Insights <span style={styles.badgeNew}>NEW</span>
           </button>
+          {features.financials && (
+            <button style={styles.tab(tab === "financials")} onClick={()=>setTab("financials")}>Financials</button>
+          )}
         </div>
         <button style={styles.btn} onClick={onReset}>Reset</button>
       </div>
@@ -533,6 +538,11 @@ export default function App() {
             <div style={{ color: "#a2a9bb" }}>No data for selected range.</div>
           )}
         </div>
+      )}
+
+      {/* Financials tab */}
+      {features.financials && tab === "financials" && (
+        <FinancialsTab />
       )}
     </div>
   );
