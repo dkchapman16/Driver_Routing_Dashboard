@@ -5,9 +5,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, useJsApiLoader, Polyline, Marker, TrafficLayer } from "@react-google-maps/api";
 import * as XLSX from "xlsx";
+import FinancialsTab from '@/features/financials/FinancialsTab';
+import { features } from '@/features';
+import { setCsvData } from '@/state/csvData';
+import { setDashboardFilters } from '@/state/filters';
 
 const COLS = {
   driver: "Drivers",
+  truck: "Truck",
   loadNo: "Load #",
   shipDate: "Ship Date",
   delDate: "Del. Date",
@@ -134,19 +139,83 @@ function DriverPicker({ drivers, selDrivers, setSelDrivers }) {
   );
 }
 
+/** Truck checkbox picker */
+function TruckPicker({ trucks, selTrucks, setSelTrucks }) {
+  const [q, setQ] = useState("");
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return trucks;
+    return trucks.filter(t => t.toLowerCase().includes(needle));
+  }, [trucks, q]);
+
+  const allSelected = selTrucks.length && selTrucks.length === trucks.length;
+  const someSelected = selTrucks.length > 0 && selTrucks.length < trucks.length;
+
+  function toggle(name) {
+    setSelTrucks(prev => prev.includes(name) ? prev.filter(t => t !== name) : [...prev, name]);
+  }
+  const selectAll = () => setSelTrucks(trucks);
+  const clearAll  = () => setSelTrucks([]);
+
+  const styles = {
+    card: { background: "#151923", border: "1px solid #232838", borderRadius: 14, padding: 12 },
+    muted: { color: "#a2a9bb" },
+    input: { width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" },
+    btn: { padding: "6px 10px", border: "1px solid #232838", borderRadius: 10, cursor: "pointer", color: "#e6e8ee", background: "transparent" },
+    btnAccent: { padding: "6px 10px", borderRadius: 10, cursor: "pointer", color: "#0b0d12", background: "#D2F000", border: "1px solid #D2F000", fontWeight: 700 },
+    list: { maxHeight: 260, overflow: "auto", marginTop: 8, border: "1px solid #232838", borderRadius: 10, padding: 8 },
+    row: { display: "flex", alignItems: "center", gap: 8, padding: "6px 6px", borderRadius: 8, cursor: "pointer" },
+    checkbox: { width: 16, height: 16, accentColor: "#D2F000" },
+    counts: { fontSize: 12, color: "#a2a9bb" },
+  };
+
+  return (
+    <div style={styles.card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 12, ...styles.muted }}>Trucks</div>
+        <div style={styles.counts}>{selTrucks.length}/{trucks.length} selected</div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 6, marginBottom: 6 }}>
+        <input placeholder="Search trucks…" value={q} onChange={(e)=>setQ(e.target.value)} style={styles.input} />
+        <button title="Select all" style={styles.btnAccent} onClick={selectAll}>All</button>
+        <button title="Clear" style={styles.btn} onClick={clearAll}>Clear</button>
+      </div>
+
+      <div style={styles.list}>
+        <div style={{ ...styles.row, fontWeight: 700 }} onClick={()=> allSelected ? clearAll() : selectAll()}>
+          <input type="checkbox" readOnly checked={allSelected} ref={el=>{ if(el) el.indeterminate = someSelected; }} style={styles.checkbox}/>
+          <span>All trucks</span>
+        </div>
+        {filtered.map(t => (
+          <label key={t} style={styles.row}>
+            <input type="checkbox" checked={selTrucks.includes(t)} onChange={()=>toggle(t)} style={styles.checkbox} />
+            <span>{t}</span>
+          </label>
+        ))}
+        {filtered.length === 0 && <div style={{ ...styles.muted, padding: 6 }}>No matches.</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const envKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
   const [apiKey, setApiKey] = useState(localStorage.getItem("gmaps_api_key") || envKey);
   useEffect(() => localStorage.setItem("gmaps_api_key", apiKey || ""), [apiKey]);
   const { isLoaded } = useJsApiLoader({ id: "gmaps-script", googleMapsApiKey: apiKey || "", libraries: ["places"] });
 
-  const [dataSource, setDataSource] = useState(localStorage.getItem("data_source") || "upload");
-  const [sheetUrl, setSheetUrl] = useState(localStorage.getItem("sheet_url") || "");
-  useEffect(() => localStorage.setItem("data_source", dataSource), [dataSource]);
-  useEffect(() => localStorage.setItem("sheet_url", sheetUrl), [sheetUrl]);
+  const [loadUrl, setLoadUrl] = useState(localStorage.getItem("load_url") || "");
+  const [fuelUrl, setFuelUrl] = useState(localStorage.getItem("fuel_url") || "");
+  const [expenseUrl, setExpenseUrl] = useState(localStorage.getItem("expense_url") || "");
+  useEffect(() => localStorage.setItem("load_url", loadUrl), [loadUrl]);
+  useEffect(() => localStorage.setItem("fuel_url", fuelUrl), [fuelUrl]);
+  useEffect(() => localStorage.setItem("expense_url", expenseUrl), [expenseUrl]);
 
   const [rows, setRows] = useState([]);
   const [fileName, setFileName] = useState("");
+  const [fuelFileName, setFuelFileName] = useState("");
+  const [expenseFileName, setExpenseFileName] = useState("");
 
   async function handleFile(e) {
     const f = e.target.files?.[0]; if (!f) return;
@@ -156,8 +225,30 @@ export default function App() {
     const ws = wb.Sheets[wb.SheetNames[0]];
     const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
     setRows(json);
+    setCsvData({ loadsRows: json });
   }
-  async function syncFromSheet(link = sheetUrl) {
+
+  async function handleFuelFile(e) {
+    const f = e.target.files?.[0]; if (!f) return;
+    setFuelFileName(f.name);
+    const buf = await f.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    setCsvData({ fuelRows: json });
+  }
+
+  async function handleExpenseFile(e) {
+    const f = e.target.files?.[0]; if (!f) return;
+    setExpenseFileName(f.name);
+    const buf = await f.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    setCsvData({ expenseRows: json });
+  }
+
+  async function syncLoadsFromLink(link = loadUrl) {
     if (!link) return;
     try {
       const res = await fetch(link, { cache: "no-store" });
@@ -166,7 +257,38 @@ export default function App() {
       const ws = wb.Sheets[wb.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
       setRows(json);
-    } catch (e) { alert("Could not load from Google Sheets CSV link. Ensure it's published to the web as CSV and public."); }
+      setCsvData({ loadsRows: json });
+    } catch (e) {
+      alert("Could not load loads CSV link. Ensure it's a public CSV file.");
+    }
+  }
+
+  async function syncFuelFromLink(link = fuelUrl) {
+    if (!link) return;
+    try {
+      const res = await fetch(link, { cache: "no-store" });
+      const csv = await res.text();
+      const wb = XLSX.read(csv, { type: "string" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      setCsvData({ fuelRows: json });
+    } catch (e) {
+      alert("Could not load fuel CSV link. Ensure it's a public CSV file.");
+    }
+  }
+
+  async function syncExpenseFromLink(link = expenseUrl) {
+    if (!link) return;
+    try {
+      const res = await fetch(link, { cache: "no-store" });
+      const csv = await res.text();
+      const wb = XLSX.read(csv, { type: "string" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      setCsvData({ expenseRows: json });
+    } catch (e) {
+      alert("Could not load expense CSV link. Ensure it's a public CSV file.");
+    }
   }
 
   const [tab, setTab] = useState("dashboard");
@@ -177,6 +299,18 @@ export default function App() {
   }, [rows]);
   const [selDrivers, setSelDrivers] = useState([]);
 
+  const trucks = useMemo(() => {
+    const s = new Set();
+    rows.forEach(r => { const t = (r[COLS.truck] ?? "").toString().trim(); if (t) s.add(t); });
+    return Array.from(s).sort();
+  }, [rows]);
+  const [selTrucks, setSelTrucks] = useState([]);
+  const [filterMode, setFilterMode] = useState('driver');
+
+  useEffect(() => {
+    if (filterMode === 'driver') setSelTrucks([]); else setSelDrivers([]);
+  }, [filterMode]);
+
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [basis, setBasis] = useState("pickup");
@@ -184,7 +318,21 @@ export default function App() {
   const [showTraffic, setShowTraffic] = useState(false);
   const fromRef = useRef(null), toRef = useRef(null);
 
-  useEffect(() => { if (dataSource === "sheets" && sheetUrl) syncFromSheet(sheetUrl); }, []);
+  useEffect(() => { if (loadUrl) syncLoadsFromLink(loadUrl); }, []);
+  useEffect(() => { if (fuelUrl) syncFuelFromLink(fuelUrl); }, []);
+  useEffect(() => { if (expenseUrl) syncExpenseFromLink(expenseUrl); }, []);
+  useEffect(() => {
+    setDashboardFilters({
+      basis,
+      dateRange: {
+        start: dateFrom ? new Date(`${dateFrom}T00:00:00`) : null,
+        end: dateTo ? new Date(`${dateTo}T00:00:00`) : null,
+      },
+      selectedDriverIds: filterMode === 'driver' ? selDrivers : [],
+      selectedTruckIds: filterMode === 'truck' ? selTrucks : [],
+      filterMode,
+    });
+  }, [basis, dateFrom, dateTo, selDrivers, selTrucks, filterMode]);
 
   const legs = useMemo(() => {
     let f = dateFrom ? new Date(dateFrom + "T00:00:00") : null;
@@ -196,7 +344,17 @@ export default function App() {
     const destCS    = (r) => cityState(r[COLS.receiverCity], r[COLS.receiverState]);
 
     return rows
-      .filter(r => selDrivers.length ? selDrivers.includes((r[COLS.driver] ?? "").toString().trim()) : true)
+      .filter(r => {
+        if (filterMode === 'driver') {
+          const d = (r[COLS.driver] ?? "").toString().trim();
+          return selDrivers.length ? selDrivers.includes(d) : true;
+        }
+        if (filterMode === 'truck') {
+          const t = (r[COLS.truck] ?? "").toString().trim();
+          return selTrucks.length ? selTrucks.includes(t) : true;
+        }
+        return true;
+      })
       .filter(r => !isCanceled(r[COLS.status]))
       .filter(r => {
         const shipDK = toDayKey(excelToDate(r[COLS.shipDate]));
@@ -229,7 +387,7 @@ export default function App() {
         const bOther = (basis === "pickup" ? b.delDate : b.shipDate)?.getTime?.() ?? 0;
         return aOther - bOther;
       });
-  }, [rows, selDrivers, dateFrom, dateTo, basis]);
+  }, [rows, selDrivers, selTrucks, dateFrom, dateTo, basis, filterMode]);
 
   // KPIs + Insights
   const kpi = useMemo(() => {
@@ -273,6 +431,19 @@ export default function App() {
     return out.sort((a,b)=>b.revenue - a.revenue);
   }, [legs]);
 
+  const laneInsights = useMemo(() => {
+    const map = new Map();
+    legs.forEach(l => {
+      const key = `${l.originCS || '—'} → ${l.destCS || '—'}`;
+      if (!map.has(key)) map.set(key, { lane: key, loads: 0, miles: 0, revenue: 0 });
+      const agg = map.get(key);
+      agg.loads += 1;
+      agg.miles += l.miles || 0;
+      agg.revenue += l.fee || 0;
+    });
+    return Array.from(map.values()).sort((a,b)=>b.loads - a.loads);
+  }, [legs]);
+
   // Geocode endpoints and draw routes
   const [endpoints, setEndpoints] = useState([]);
   const mapRef = useRef(null);
@@ -281,15 +452,18 @@ export default function App() {
   useEffect(() => {
     if (!isLoaded) return;
     const geocoder = new google.maps.Geocoder();
+    let cancelled = false;
     (async () => {
       const out = [];
       for (const l of legs) {
+        if (cancelled) break;
         if (!l.originFull || !l.destFull) continue;
         try {
           const [o, d] = await Promise.all([
             geocoder.geocode({ address: l.originFull }).then(r=>r.results?.[0]?.geometry?.location),
             geocoder.geocode({ address: l.destFull   }).then(r=>r.results?.[0]?.geometry?.location),
           ]);
+          if (cancelled) break;
           if (o && d) {
             const mid = new google.maps.LatLng((o.lat()+d.lat())/2, (o.lng()+d.lng())/2);
             out.push({ start:o, end:d, mid, color: colorByDriver(l.driver) });
@@ -297,9 +471,10 @@ export default function App() {
         } catch {}
         await new Promise(r=>setTimeout(r,80));
       }
-      setEndpoints(out);
+      if (!cancelled) setEndpoints(out);
     })();
-  }, [isLoaded, JSON.stringify(legs.map(l=>[l.originFull,l.destFull,l.driver]))]);
+    return () => { cancelled = true; };
+  }, [isLoaded, legs]);
 
   useEffect(() => {
     if (!isLoaded || !mapRef.current || !endpoints.length) return;
@@ -353,16 +528,19 @@ export default function App() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={styles.tab(tab === "dashboard")} onClick={()=>setTab("dashboard")}>Dashboard</button>
-          <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>
-            Insights <span style={styles.badgeNew}>NEW</span>
-          </button>
+          <button style={styles.tab(tab === "data")} onClick={()=>setTab("data")}>Data Source</button>
+          <button style={styles.tab(tab === "lane")} onClick={()=>setTab("lane")}>Lane</button>
+          <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>Insights <span style={styles.badgeNew}>NEW</span></button>
+          {features.financials && (
+            <button style={styles.tab(tab === "financials")} onClick={()=>setTab("financials")}>Financials</button>
+          )}
         </div>
         <button style={styles.btn} onClick={onReset}>Reset</button>
       </div>
 
       {/* Filters (dashboard only) */}
       {tab === "dashboard" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0,1fr))", gap: 8 }}>
           <div style={{ ...styles.card, padding: 8 }}>
             <div style={{ fontSize: 12, ...styles.muted }}>Date from</div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -399,19 +577,10 @@ export default function App() {
             <div style={{ fontSize: 12, ...styles.muted }}>Traffic</div>
             <button style={styles.btn} onClick={()=>setShowTraffic(v=>!v)}>{showTraffic? "On":"Off"}</button>
           </div>
-          <div style={{ ...styles.card, padding: 8 }}>
-            <div style={{ fontSize: 12, ...styles.muted }}>Data Source</div>
-            <select value={dataSource} onChange={(e)=>setDataSource(e.target.value)}
-                    style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
-              <option value="upload">Upload</option>
-              <option value="sheets">Google Sheets</option>
-            </select>
-          </div>
         </div>
       )}
 
-      {/* API + source (dashboard only) */}
-      {tab === "dashboard" && (
+      {tab === "data" && (
         <div style={{ ...styles.card, padding: 12, marginTop: 10 }}>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 220 }}>
@@ -420,21 +589,41 @@ export default function App() {
                      style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
             </div>
 
-            {dataSource === "upload" ? (
-              <div style={{ minWidth: 260 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Upload Excel/CSV</div>
-                <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile}
-                       style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-                {fileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fileName}</div>}
-              </div>
-            ) : (
-              <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 420 }}>
-                <input type="url" placeholder="Paste published CSV link"
-                       value={sheetUrl} onChange={(e)=>setSheetUrl(e.target.value)}
+            <div style={{ minWidth: 260 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Upload Loads CSV</div>
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile}
+                     style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+              {fileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fileName}</div>}
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input type="url" placeholder="CSV link" value={loadUrl} onChange={(e)=>setLoadUrl(e.target.value)}
                        style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-                <button style={styles.btnAccent} onClick={()=>syncFromSheet()}>Sync</button>
+                <button style={styles.btnAccent} onClick={()=>syncLoadsFromLink()}>Sync</button>
               </div>
-            )}
+            </div>
+
+            <div style={{ minWidth: 260 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Upload Fuel CSV</div>
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFuelFile}
+                     style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+              {fuelFileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fuelFileName}</div>}
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input type="url" placeholder="CSV link" value={fuelUrl} onChange={(e)=>setFuelUrl(e.target.value)}
+                       style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                <button style={styles.btnAccent} onClick={()=>syncFuelFromLink()}>Sync</button>
+              </div>
+            </div>
+
+            <div style={{ minWidth: 260 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Upload Expenses CSV</div>
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleExpenseFile}
+                     style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+              {expenseFileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {expenseFileName}</div>}
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input type="url" placeholder="CSV link" value={expenseUrl} onChange={(e)=>setExpenseUrl(e.target.value)}
+                       style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                <button style={styles.btnAccent} onClick={()=>syncExpenseFromLink()}>Sync</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -457,7 +646,22 @@ export default function App() {
         <div style={{ display: "grid", gridTemplateColumns: `${sidebarW}px 6px 1fr`, gap: 14, marginTop: 12, alignItems: "stretch" }}>
           {/* Sidebar */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <DriverPicker drivers={drivers} selDrivers={selDrivers} setSelDrivers={setSelDrivers} />
+            <div style={{ ...styles.card, padding: 12 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Filter by</div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+                <label style={{ display:'flex', alignItems:'center', gap:4 }}>
+                  <input type="radio" name="filterMode" value="driver" checked={filterMode==='driver'} onChange={()=>setFilterMode('driver')} /> Driver
+                </label>
+                <label style={{ display:'flex', alignItems:'center', gap:4 }}>
+                  <input type="radio" name="filterMode" value="truck" checked={filterMode==='truck'} onChange={()=>setFilterMode('truck')} /> Truck
+                </label>
+              </div>
+            </div>
+            {filterMode === 'driver' ? (
+              <DriverPicker drivers={drivers} selDrivers={selDrivers} setSelDrivers={setSelDrivers} />
+            ) : (
+              <TruckPicker trucks={trucks} selTrucks={selTrucks} setSelTrucks={setSelTrucks} />
+            )}
 
             <div style={{ ...styles.card, padding: 12 }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Loads</div>
@@ -511,6 +715,39 @@ export default function App() {
         </div>
       )}
 
+      {/* Lane tab */}
+      {tab === "lane" && (
+        <div style={{ ...styles.card, padding: 12, marginTop: 12 }}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 10 }}>Lane Summary (current filters)</div>
+          {laneInsights.length ? (
+            <table style={{ width: "100%", textAlign: "left", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: "4px 8px" }}>Lane</th>
+                  <th style={{ padding: "4px 8px" }}>Loads</th>
+                  <th style={{ padding: "4px 8px" }}>Miles</th>
+                  <th style={{ padding: "4px 8px" }}>Revenue</th>
+                  <th style={{ padding: "4px 8px" }}>RPM</th>
+                </tr>
+              </thead>
+              <tbody>
+                {laneInsights.map((ln, i) => (
+                  <tr key={i}>
+                    <td style={{ padding: "4px 8px" }}>{ln.lane}</td>
+                    <td style={{ padding: "4px 8px" }}>{num(ln.loads)}</td>
+                    <td style={{ padding: "4px 8px" }}>{num(ln.miles)}</td>
+                    <td style={{ padding: "4px 8px" }}>{money(ln.revenue)}</td>
+                    <td style={{ padding: "4px 8px" }}>{rpm(ln.revenue, ln.miles)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ color: "#a2a9bb" }}>No lane data for selected range.</div>
+          )}
+        </div>
+      )}
+
       {/* Insights tab */}
       {tab === "insights" && (
         <div style={{ ...styles.card, padding: 12 }}>
@@ -533,6 +770,11 @@ export default function App() {
             <div style={{ color: "#a2a9bb" }}>No data for selected range.</div>
           )}
         </div>
+      )}
+
+      {/* Financials tab */}
+      {features.financials && tab === "financials" && (
+        <FinancialsTab />
       )}
     </div>
   );
