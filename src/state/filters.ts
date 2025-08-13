@@ -5,6 +5,7 @@ export type DashboardFilters = {
   dateRange: { start: Date | null; end: Date | null };
   selectedDriverIds: string[];
   selectedTruckIds: string[];
+  filterMode: 'driver' | 'truck';
 };
 
 let filters: DashboardFilters = {
@@ -12,6 +13,7 @@ let filters: DashboardFilters = {
   dateRange: { start: null, end: null },
   selectedDriverIds: [],
   selectedTruckIds: [],
+  filterMode: 'driver',
 };
 
 const listeners = new Set<() => void>();

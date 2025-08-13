@@ -110,7 +110,7 @@ export function buildFinance(loads:LoadRow[], fuel:FuelRow[], exp:ExpenseRow[], 
     const d = basis==='pickup'?L.pickup_date:L.delivery_date; if(!d) continue;
     if(!inRange(d,rangeStart,rangeEnd)) continue;
     if(trucks.length && !trucks.includes(L.truck)) continue;
-    if(drivers.length && L.driver && !drivers.includes(L.driver)) continue;
+    if(drivers.length && (!L.driver || !drivers.includes(L.driver))) continue;
     const kd = keyDate(d,g);
     add({ keyDate:kd, timegrain:g, truck:L.truck, driver:L.driver||'',
       revenue:L.revenue, miles_loaded:L.miles_loaded, miles_empty:L.miles_empty, miles_total:L.miles_loaded+L.miles_empty, loads:1,
@@ -121,7 +121,7 @@ export function buildFinance(loads:LoadRow[], fuel:FuelRow[], exp:ExpenseRow[], 
   for(const F of fuel){
     if(!F.date) continue; if(!inRange(F.date,rangeStart,rangeEnd)) continue;
     if(trucks.length && !trucks.includes(F.truck)) continue;
-    if(drivers.length && F.driver && !drivers.includes(F.driver)) continue;
+    if(drivers.length && (!F.driver || !drivers.includes(F.driver))) continue;
     const kd = keyDate(F.date,g);
     add({ keyDate:kd, timegrain:g, truck:F.truck, driver:F.driver||'',
       revenue:0, miles_loaded:0, miles_empty:0, miles_total:0, loads:0,
@@ -132,7 +132,7 @@ export function buildFinance(loads:LoadRow[], fuel:FuelRow[], exp:ExpenseRow[], 
   for(const E of exp){
     if(!E.date) continue; if(!inRange(E.date,rangeStart,rangeEnd)) continue;
     if(trucks.length && !trucks.includes(E.truck)) continue;
-    if(drivers.length && E.driver && !drivers.includes(E.driver)) continue;
+    if(drivers.length && (!E.driver || !drivers.includes(E.driver))) continue;
     const kd = keyDate(E.date,g);
     add({ keyDate:kd, timegrain:g, truck:E.truck||'', driver:E.driver||'',
       revenue:0, miles_loaded:0, miles_empty:0, miles_total:0, loads:0,

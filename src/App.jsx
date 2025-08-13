@@ -12,6 +12,7 @@ import { setDashboardFilters } from '@/state/filters';
 
 const COLS = {
   driver: "Drivers",
+  truck: "Truck",
   loadNo: "Load #",
   shipDate: "Ship Date",
   delDate: "Del. Date",
@@ -138,6 +139,66 @@ function DriverPicker({ drivers, selDrivers, setSelDrivers }) {
   );
 }
 
+/** Truck checkbox picker */
+function TruckPicker({ trucks, selTrucks, setSelTrucks }) {
+  const [q, setQ] = useState("");
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return trucks;
+    return trucks.filter(t => t.toLowerCase().includes(needle));
+  }, [trucks, q]);
+
+  const allSelected = selTrucks.length && selTrucks.length === trucks.length;
+  const someSelected = selTrucks.length > 0 && selTrucks.length < trucks.length;
+
+  function toggle(name) {
+    setSelTrucks(prev => prev.includes(name) ? prev.filter(t => t !== name) : [...prev, name]);
+  }
+  const selectAll = () => setSelTrucks(trucks);
+  const clearAll  = () => setSelTrucks([]);
+
+  const styles = {
+    card: { background: "#151923", border: "1px solid #232838", borderRadius: 14, padding: 12 },
+    muted: { color: "#a2a9bb" },
+    input: { width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" },
+    btn: { padding: "6px 10px", border: "1px solid #232838", borderRadius: 10, cursor: "pointer", color: "#e6e8ee", background: "transparent" },
+    btnAccent: { padding: "6px 10px", borderRadius: 10, cursor: "pointer", color: "#0b0d12", background: "#D2F000", border: "1px solid #D2F000", fontWeight: 700 },
+    list: { maxHeight: 260, overflow: "auto", marginTop: 8, border: "1px solid #232838", borderRadius: 10, padding: 8 },
+    row: { display: "flex", alignItems: "center", gap: 8, padding: "6px 6px", borderRadius: 8, cursor: "pointer" },
+    checkbox: { width: 16, height: 16, accentColor: "#D2F000" },
+    counts: { fontSize: 12, color: "#a2a9bb" },
+  };
+
+  return (
+    <div style={styles.card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 12, ...styles.muted }}>Trucks</div>
+        <div style={styles.counts}>{selTrucks.length}/{trucks.length} selected</div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 6, marginBottom: 6 }}>
+        <input placeholder="Search trucks…" value={q} onChange={(e)=>setQ(e.target.value)} style={styles.input} />
+        <button title="Select all" style={styles.btnAccent} onClick={selectAll}>All</button>
+        <button title="Clear" style={styles.btn} onClick={clearAll}>Clear</button>
+      </div>
+
+      <div style={styles.list}>
+        <div style={{ ...styles.row, fontWeight: 700 }} onClick={()=> allSelected ? clearAll() : selectAll()}>
+          <input type="checkbox" readOnly checked={allSelected} ref={el=>{ if(el) el.indeterminate = someSelected; }} style={styles.checkbox}/>
+          <span>All trucks</span>
+        </div>
+        {filtered.map(t => (
+          <label key={t} style={styles.row}>
+            <input type="checkbox" checked={selTrucks.includes(t)} onChange={()=>toggle(t)} style={styles.checkbox} />
+            <span>{t}</span>
+          </label>
+        ))}
+        {filtered.length === 0 && <div style={{ ...styles.muted, padding: 6 }}>No matches.</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const envKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
   const [apiKey, setApiKey] = useState(localStorage.getItem("gmaps_api_key") || envKey);
@@ -238,6 +299,18 @@ export default function App() {
   }, [rows]);
   const [selDrivers, setSelDrivers] = useState([]);
 
+  const trucks = useMemo(() => {
+    const s = new Set();
+    rows.forEach(r => { const t = (r[COLS.truck] ?? "").toString().trim(); if (t) s.add(t); });
+    return Array.from(s).sort();
+  }, [rows]);
+  const [selTrucks, setSelTrucks] = useState([]);
+  const [filterMode, setFilterMode] = useState('driver');
+
+  useEffect(() => {
+    if (filterMode === 'driver') setSelTrucks([]); else setSelDrivers([]);
+  }, [filterMode]);
+
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [basis, setBasis] = useState("pickup");
@@ -255,10 +328,11 @@ export default function App() {
         start: dateFrom ? new Date(`${dateFrom}T00:00:00`) : null,
         end: dateTo ? new Date(`${dateTo}T00:00:00`) : null,
       },
-      selectedDriverIds: selDrivers,
-      selectedTruckIds: [],
+      selectedDriverIds: filterMode === 'driver' ? selDrivers : [],
+      selectedTruckIds: filterMode === 'truck' ? selTrucks : [],
+      filterMode,
     });
-  }, [basis, dateFrom, dateTo, selDrivers]);
+  }, [basis, dateFrom, dateTo, selDrivers, selTrucks, filterMode]);
 
   const legs = useMemo(() => {
     let f = dateFrom ? new Date(dateFrom + "T00:00:00") : null;
@@ -270,7 +344,17 @@ export default function App() {
     const destCS    = (r) => cityState(r[COLS.receiverCity], r[COLS.receiverState]);
 
     return rows
-      .filter(r => selDrivers.length ? selDrivers.includes((r[COLS.driver] ?? "").toString().trim()) : true)
+      .filter(r => {
+        if (filterMode === 'driver') {
+          const d = (r[COLS.driver] ?? "").toString().trim();
+          return selDrivers.length ? selDrivers.includes(d) : true;
+        }
+        if (filterMode === 'truck') {
+          const t = (r[COLS.truck] ?? "").toString().trim();
+          return selTrucks.length ? selTrucks.includes(t) : true;
+        }
+        return true;
+      })
       .filter(r => !isCanceled(r[COLS.status]))
       .filter(r => {
         const shipDK = toDayKey(excelToDate(r[COLS.shipDate]));
@@ -303,7 +387,7 @@ export default function App() {
         const bOther = (basis === "pickup" ? b.delDate : b.shipDate)?.getTime?.() ?? 0;
         return aOther - bOther;
       });
-  }, [rows, selDrivers, dateFrom, dateTo, basis]);
+  }, [rows, selDrivers, selTrucks, dateFrom, dateTo, basis, filterMode]);
 
   // KPIs + Insights
   const kpi = useMemo(() => {
@@ -562,7 +646,22 @@ export default function App() {
         <div style={{ display: "grid", gridTemplateColumns: `${sidebarW}px 6px 1fr`, gap: 14, marginTop: 12, alignItems: "stretch" }}>
           {/* Sidebar */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <DriverPicker drivers={drivers} selDrivers={selDrivers} setSelDrivers={setSelDrivers} />
+            <div style={{ ...styles.card, padding: 12 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Filter by</div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+                <label style={{ display:'flex', alignItems:'center', gap:4 }}>
+                  <input type="radio" name="filterMode" value="driver" checked={filterMode==='driver'} onChange={()=>setFilterMode('driver')} /> Driver
+                </label>
+                <label style={{ display:'flex', alignItems:'center', gap:4 }}>
+                  <input type="radio" name="filterMode" value="truck" checked={filterMode==='truck'} onChange={()=>setFilterMode('truck')} /> Truck
+                </label>
+              </div>
+            </div>
+            {filterMode === 'driver' ? (
+              <DriverPicker drivers={drivers} selDrivers={selDrivers} setSelDrivers={setSelDrivers} />
+            ) : (
+              <TruckPicker trucks={trucks} selTrucks={selTrucks} setSelTrucks={setSelTrucks} />
+            )}
 
             <div style={{ ...styles.card, padding: 12 }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Loads</div>
