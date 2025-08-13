@@ -29,11 +29,13 @@ export type LoadRow = {
   truck:string; driver:string; pickup_date:Date|null; delivery_date:Date|null;
   miles_loaded:number; miles_empty:number; revenue:number;
   shipper?:string; receiver?:string; receiver_arrival_time?:Date|null; receiver_arrival_status?:string;
+  status?:string;
 };
 
 export function normalizeLoads(rows:Raw[]):LoadRow[] {
   return rows.map(r=>{
     const del = toDate(r['Del. Date']) ?? toDate(r['Last Del. Date']);
+    const status = normStr(r['Load Status'] ?? r['Status'] ?? r['Receiver Arrival Status']);
     return {
       truck: normStr(r['Truck']),
       driver: normStr(r['Drivers'] ?? r['Driver']),
@@ -46,8 +48,9 @@ export function normalizeLoads(rows:Raw[]):LoadRow[] {
       receiver: normStr(r['Receiver']),
       receiver_arrival_time: toDate(r['Receiver Arrival Time']),
       receiver_arrival_status: normStr(r['Receiver Arrival Status']),
+      status,
     };
-  }).filter(l=>l.truck!=='');
+  }).filter(l=>l.truck!=='' && !/cancel/i.test(l.status||''));
 }
 
 export type FuelRow = { date:Date|null; truck:string; driver:string; item:string; gallons:number; amount:number; };
@@ -107,6 +110,7 @@ export function buildFinance(loads:LoadRow[], fuel:FuelRow[], exp:ExpenseRow[], 
 
   // Loads
   for(const L of loads){
+    if(/cancel/i.test(L.status||'')) continue;
     const d = basis==='pickup'?L.pickup_date:L.delivery_date; if(!d) continue;
     if(!inRange(d,rangeStart,rangeEnd)) continue;
     if(trucks.length && !trucks.includes(L.truck)) continue;
