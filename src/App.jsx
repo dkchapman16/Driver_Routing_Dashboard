@@ -252,8 +252,8 @@ export default function App() {
     setDashboardFilters({
       basis,
       dateRange: {
-        start: dateFrom ? new Date(dateFrom) : null,
-        end: dateTo ? new Date(dateTo) : null,
+        start: dateFrom ? new Date(`${dateFrom}T00:00:00`) : null,
+        end: dateTo ? new Date(`${dateTo}T00:00:00`) : null,
       },
       selectedDriverIds: selDrivers,
       selectedTruckIds: [],

@@ -3,7 +3,24 @@ type Raw = Record<string, any>;
 
 const normStr = (v:any)=> (v==null?'':String(v).trim());
 const normNum = (v:any)=>{ if(v==null||v==='')return 0; const n=Number(String(v).replace(/\$|,/g,'')); return Number.isFinite(n)?n:0; };
-const toDate = (v:any)=>{ const d=new Date(v); return isNaN(d.valueOf())?null:d; };
+// Accept Excel serial numbers, numeric strings, or regular date strings.
+const toDate = (v:any)=>{
+  if(v==null || v==='') return null;
+  if(typeof v === 'number'){
+    const base = Date.UTC(1899,11,30); // Excel epoch
+    return new Date(base + v*86400000);
+  }
+  if(typeof v === 'string'){
+    const trimmed = v.trim();
+    if(trimmed === '') return null;
+    if(/^\d+(\.\d+)?$/.test(trimmed)) return toDate(Number(trimmed));
+    const onlyDate = trimmed.split(' ')[0];
+    const d = new Date(`${onlyDate}T00:00:00`);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+};
 const sod = (d:Date)=> new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const weekStart = (d:Date)=>{ const out=new Date(d); out.setDate(d.getDate()-d.getDay()); out.setHours(0,0,0,0); return out; };
 const monthStart = (d:Date)=> new Date(d.getFullYear(), d.getMonth(), 1);
@@ -104,6 +121,7 @@ export function buildFinance(loads:LoadRow[], fuel:FuelRow[], exp:ExpenseRow[], 
   for(const F of fuel){
     if(!F.date) continue; if(!inRange(F.date,rangeStart,rangeEnd)) continue;
     if(trucks.length && !trucks.includes(F.truck)) continue;
+    if(drivers.length && F.driver && !drivers.includes(F.driver)) continue;
     const kd = keyDate(F.date,g);
     add({ keyDate:kd, timegrain:g, truck:F.truck, driver:F.driver||'',
       revenue:0, miles_loaded:0, miles_empty:0, miles_total:0, loads:0,
