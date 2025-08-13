@@ -7,6 +7,8 @@ import { GoogleMap, useJsApiLoader, Polyline, Marker, TrafficLayer } from "@reac
 import * as XLSX from "xlsx";
 import FinancialsTab from '@/features/financials/FinancialsTab';
 import { features } from '@/features';
+import { setCsvData } from '@/state/csvData';
+import { setDashboardFilters } from '@/state/filters';
 
 const COLS = {
   driver: "Drivers",
@@ -149,6 +151,8 @@ export default function App() {
 
   const [rows, setRows] = useState([]);
   const [fileName, setFileName] = useState("");
+  const [fuelFileName, setFuelFileName] = useState("");
+  const [expenseFileName, setExpenseFileName] = useState("");
 
   async function handleFile(e) {
     const f = e.target.files?.[0]; if (!f) return;
@@ -158,6 +162,27 @@ export default function App() {
     const ws = wb.Sheets[wb.SheetNames[0]];
     const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
     setRows(json);
+    setCsvData({ loadsRows: json });
+  }
+
+  async function handleFuelFile(e) {
+    const f = e.target.files?.[0]; if (!f) return;
+    setFuelFileName(f.name);
+    const buf = await f.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    setCsvData({ fuelRows: json });
+  }
+
+  async function handleExpenseFile(e) {
+    const f = e.target.files?.[0]; if (!f) return;
+    setExpenseFileName(f.name);
+    const buf = await f.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    setCsvData({ expenseRows: json });
   }
   async function syncFromSheet(link = sheetUrl) {
     if (!link) return;
@@ -168,6 +193,7 @@ export default function App() {
       const ws = wb.Sheets[wb.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
       setRows(json);
+      setCsvData({ loadsRows: json });
     } catch (e) { alert("Could not load from Google Sheets CSV link. Ensure it's published to the web as CSV and public."); }
   }
 
@@ -187,6 +213,17 @@ export default function App() {
   const fromRef = useRef(null), toRef = useRef(null);
 
   useEffect(() => { if (dataSource === "sheets" && sheetUrl) syncFromSheet(sheetUrl); }, []);
+  useEffect(() => {
+    setDashboardFilters({
+      basis,
+      dateRange: {
+        start: dateFrom ? new Date(dateFrom) : null,
+        end: dateTo ? new Date(dateTo) : null,
+      },
+      selectedDriverIds: selDrivers,
+      selectedTruckIds: [],
+    });
+  }, [basis, dateFrom, dateTo, selDrivers]);
 
   const legs = useMemo(() => {
     let f = dateFrom ? new Date(dateFrom + "T00:00:00") : null;
@@ -355,6 +392,7 @@ export default function App() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={styles.tab(tab === "dashboard")} onClick={()=>setTab("dashboard")}>Dashboard</button>
+          <button style={styles.tab(tab === "lane")} onClick={()=>setTab("lane")}>Lane</button>
           <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>
             Insights <span style={styles.badgeNew}>NEW</span>
           </button>
@@ -426,11 +464,25 @@ export default function App() {
             </div>
 
             {dataSource === "upload" ? (
-              <div style={{ minWidth: 260 }}>
-                <div style={{ fontSize: 12, ...styles.muted }}>Upload Excel/CSV</div>
-                <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile}
-                       style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-                {fileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fileName}</div>}
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ minWidth: 260 }}>
+                  <div style={{ fontSize: 12, ...styles.muted }}>Upload Loads CSV</div>
+                  <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile}
+                         style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                  {fileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fileName}</div>}
+                </div>
+                <div style={{ minWidth: 260 }}>
+                  <div style={{ fontSize: 12, ...styles.muted }}>Upload Fuel CSV</div>
+                  <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFuelFile}
+                         style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                  {fuelFileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fuelFileName}</div>}
+                </div>
+                <div style={{ minWidth: 260 }}>
+                  <div style={{ fontSize: 12, ...styles.muted }}>Upload Expenses CSV</div>
+                  <input type="file" accept=".xlsx,.xls,.csv" onChange={handleExpenseFile}
+                         style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                  {expenseFileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {expenseFileName}</div>}
+                </div>
               </div>
             ) : (
               <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 420 }}>
@@ -513,6 +565,13 @@ export default function App() {
             ) : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#a2a9bb" }}>Loading Google Maps…</div>))
             : (<div style={{ display: "grid", placeItems: "center", height: "100%", color: "#a2a9bb" }}>Paste your Google Maps API key to load the map</div>)}
           </div>
+        </div>
+      )}
+
+      {/* Lane tab */}
+      {tab === "lane" && (
+        <div style={{ ...styles.card, padding: 12, marginTop: 12 }}>
+          Lane view
         </div>
       )}
 
