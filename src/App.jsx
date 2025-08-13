@@ -347,6 +347,19 @@ export default function App() {
     return out.sort((a,b)=>b.revenue - a.revenue);
   }, [legs]);
 
+  const laneInsights = useMemo(() => {
+    const map = new Map();
+    legs.forEach(l => {
+      const key = `${l.originCS || '—'} → ${l.destCS || '—'}`;
+      if (!map.has(key)) map.set(key, { lane: key, loads: 0, miles: 0, revenue: 0 });
+      const agg = map.get(key);
+      agg.loads += 1;
+      agg.miles += l.miles || 0;
+      agg.revenue += l.fee || 0;
+    });
+    return Array.from(map.values()).sort((a,b)=>b.loads - a.loads);
+  }, [legs]);
+
   // Geocode endpoints and draw routes
   const [endpoints, setEndpoints] = useState([]);
   const mapRef = useRef(null);
@@ -355,15 +368,18 @@ export default function App() {
   useEffect(() => {
     if (!isLoaded) return;
     const geocoder = new google.maps.Geocoder();
+    let cancelled = false;
     (async () => {
       const out = [];
       for (const l of legs) {
+        if (cancelled) break;
         if (!l.originFull || !l.destFull) continue;
         try {
           const [o, d] = await Promise.all([
             geocoder.geocode({ address: l.originFull }).then(r=>r.results?.[0]?.geometry?.location),
             geocoder.geocode({ address: l.destFull   }).then(r=>r.results?.[0]?.geometry?.location),
           ]);
+          if (cancelled) break;
           if (o && d) {
             const mid = new google.maps.LatLng((o.lat()+d.lat())/2, (o.lng()+d.lng())/2);
             out.push({ start:o, end:d, mid, color: colorByDriver(l.driver) });
@@ -371,9 +387,10 @@ export default function App() {
         } catch {}
         await new Promise(r=>setTimeout(r,80));
       }
-      setEndpoints(out);
+      if (!cancelled) setEndpoints(out);
     })();
-  }, [isLoaded, JSON.stringify(legs.map(l=>[l.originFull,l.destFull,l.driver]))]);
+    return () => { cancelled = true; };
+  }, [isLoaded, legs]);
 
   useEffect(() => {
     if (!isLoaded || !mapRef.current || !endpoints.length) return;
@@ -602,7 +619,33 @@ export default function App() {
       {/* Lane tab */}
       {tab === "lane" && (
         <div style={{ ...styles.card, padding: 12, marginTop: 12 }}>
-          Lane view
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 10 }}>Lane Summary (current filters)</div>
+          {laneInsights.length ? (
+            <table style={{ width: "100%", textAlign: "left", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: "4px 8px" }}>Lane</th>
+                  <th style={{ padding: "4px 8px" }}>Loads</th>
+                  <th style={{ padding: "4px 8px" }}>Miles</th>
+                  <th style={{ padding: "4px 8px" }}>Revenue</th>
+                  <th style={{ padding: "4px 8px" }}>RPM</th>
+                </tr>
+              </thead>
+              <tbody>
+                {laneInsights.map((ln, i) => (
+                  <tr key={i}>
+                    <td style={{ padding: "4px 8px" }}>{ln.lane}</td>
+                    <td style={{ padding: "4px 8px" }}>{num(ln.loads)}</td>
+                    <td style={{ padding: "4px 8px" }}>{num(ln.miles)}</td>
+                    <td style={{ padding: "4px 8px" }}>{money(ln.revenue)}</td>
+                    <td style={{ padding: "4px 8px" }}>{rpm(ln.revenue, ln.miles)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ color: "#a2a9bb" }}>No lane data for selected range.</div>
+          )}
         </div>
       )}
 
