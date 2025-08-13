@@ -144,10 +144,12 @@ export default function App() {
   useEffect(() => localStorage.setItem("gmaps_api_key", apiKey || ""), [apiKey]);
   const { isLoaded } = useJsApiLoader({ id: "gmaps-script", googleMapsApiKey: apiKey || "", libraries: ["places"] });
 
-  const [dataSource, setDataSource] = useState(localStorage.getItem("data_source") || "upload");
-  const [sheetUrl, setSheetUrl] = useState(localStorage.getItem("sheet_url") || "");
-  useEffect(() => localStorage.setItem("data_source", dataSource), [dataSource]);
-  useEffect(() => localStorage.setItem("sheet_url", sheetUrl), [sheetUrl]);
+  const [loadUrl, setLoadUrl] = useState(localStorage.getItem("load_url") || "");
+  const [fuelUrl, setFuelUrl] = useState(localStorage.getItem("fuel_url") || "");
+  const [expenseUrl, setExpenseUrl] = useState(localStorage.getItem("expense_url") || "");
+  useEffect(() => localStorage.setItem("load_url", loadUrl), [loadUrl]);
+  useEffect(() => localStorage.setItem("fuel_url", fuelUrl), [fuelUrl]);
+  useEffect(() => localStorage.setItem("expense_url", expenseUrl), [expenseUrl]);
 
   const [rows, setRows] = useState([]);
   const [fileName, setFileName] = useState("");
@@ -184,7 +186,8 @@ export default function App() {
     const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
     setCsvData({ expenseRows: json });
   }
-  async function syncFromSheet(link = sheetUrl) {
+
+  async function syncLoadsFromLink(link = loadUrl) {
     if (!link) return;
     try {
       const res = await fetch(link, { cache: "no-store" });
@@ -194,7 +197,37 @@ export default function App() {
       const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
       setRows(json);
       setCsvData({ loadsRows: json });
-    } catch (e) { alert("Could not load from Google Sheets CSV link. Ensure it's published to the web as CSV and public."); }
+    } catch (e) {
+      alert("Could not load loads CSV link. Ensure it's a public CSV file.");
+    }
+  }
+
+  async function syncFuelFromLink(link = fuelUrl) {
+    if (!link) return;
+    try {
+      const res = await fetch(link, { cache: "no-store" });
+      const csv = await res.text();
+      const wb = XLSX.read(csv, { type: "string" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      setCsvData({ fuelRows: json });
+    } catch (e) {
+      alert("Could not load fuel CSV link. Ensure it's a public CSV file.");
+    }
+  }
+
+  async function syncExpenseFromLink(link = expenseUrl) {
+    if (!link) return;
+    try {
+      const res = await fetch(link, { cache: "no-store" });
+      const csv = await res.text();
+      const wb = XLSX.read(csv, { type: "string" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      setCsvData({ expenseRows: json });
+    } catch (e) {
+      alert("Could not load expense CSV link. Ensure it's a public CSV file.");
+    }
   }
 
   const [tab, setTab] = useState("dashboard");
@@ -212,7 +245,9 @@ export default function App() {
   const [showTraffic, setShowTraffic] = useState(false);
   const fromRef = useRef(null), toRef = useRef(null);
 
-  useEffect(() => { if (dataSource === "sheets" && sheetUrl) syncFromSheet(sheetUrl); }, []);
+  useEffect(() => { if (loadUrl) syncLoadsFromLink(loadUrl); }, []);
+  useEffect(() => { if (fuelUrl) syncFuelFromLink(fuelUrl); }, []);
+  useEffect(() => { if (expenseUrl) syncExpenseFromLink(expenseUrl); }, []);
   useEffect(() => {
     setDashboardFilters({
       basis,
@@ -392,10 +427,9 @@ export default function App() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={styles.tab(tab === "dashboard")} onClick={()=>setTab("dashboard")}>Dashboard</button>
+          <button style={styles.tab(tab === "data")} onClick={()=>setTab("data")}>Data Source</button>
           <button style={styles.tab(tab === "lane")} onClick={()=>setTab("lane")}>Lane</button>
-          <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>
-            Insights <span style={styles.badgeNew}>NEW</span>
-          </button>
+          <button style={styles.tab(tab === "insights")} onClick={()=>setTab("insights")}>Insights <span style={styles.badgeNew}>NEW</span></button>
           {features.financials && (
             <button style={styles.tab(tab === "financials")} onClick={()=>setTab("financials")}>Financials</button>
           )}
@@ -405,7 +439,7 @@ export default function App() {
 
       {/* Filters (dashboard only) */}
       {tab === "dashboard" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0,1fr))", gap: 8 }}>
           <div style={{ ...styles.card, padding: 8 }}>
             <div style={{ fontSize: 12, ...styles.muted }}>Date from</div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -442,19 +476,10 @@ export default function App() {
             <div style={{ fontSize: 12, ...styles.muted }}>Traffic</div>
             <button style={styles.btn} onClick={()=>setShowTraffic(v=>!v)}>{showTraffic? "On":"Off"}</button>
           </div>
-          <div style={{ ...styles.card, padding: 8 }}>
-            <div style={{ fontSize: 12, ...styles.muted }}>Data Source</div>
-            <select value={dataSource} onChange={(e)=>setDataSource(e.target.value)}
-                    style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}>
-              <option value="upload">Upload</option>
-              <option value="sheets">Google Sheets</option>
-            </select>
-          </div>
         </div>
       )}
 
-      {/* API + source (dashboard only) */}
-      {tab === "dashboard" && (
+      {tab === "data" && (
         <div style={{ ...styles.card, padding: 12, marginTop: 10 }}>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 220 }}>
@@ -463,35 +488,41 @@ export default function App() {
                      style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
             </div>
 
-            {dataSource === "upload" ? (
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ minWidth: 260 }}>
-                  <div style={{ fontSize: 12, ...styles.muted }}>Upload Loads CSV</div>
-                  <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile}
-                         style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-                  {fileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fileName}</div>}
-                </div>
-                <div style={{ minWidth: 260 }}>
-                  <div style={{ fontSize: 12, ...styles.muted }}>Upload Fuel CSV</div>
-                  <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFuelFile}
-                         style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-                  {fuelFileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fuelFileName}</div>}
-                </div>
-                <div style={{ minWidth: 260 }}>
-                  <div style={{ fontSize: 12, ...styles.muted }}>Upload Expenses CSV</div>
-                  <input type="file" accept=".xlsx,.xls,.csv" onChange={handleExpenseFile}
-                         style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-                  {expenseFileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {expenseFileName}</div>}
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 420 }}>
-                <input type="url" placeholder="Paste published CSV link"
-                       value={sheetUrl} onChange={(e)=>setSheetUrl(e.target.value)}
+            <div style={{ minWidth: 260 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Upload Loads CSV</div>
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile}
+                     style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+              {fileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fileName}</div>}
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input type="url" placeholder="CSV link" value={loadUrl} onChange={(e)=>setLoadUrl(e.target.value)}
                        style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
-                <button style={styles.btnAccent} onClick={()=>syncFromSheet()}>Sync</button>
+                <button style={styles.btnAccent} onClick={()=>syncLoadsFromLink()}>Sync</button>
               </div>
-            )}
+            </div>
+
+            <div style={{ minWidth: 260 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Upload Fuel CSV</div>
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFuelFile}
+                     style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+              {fuelFileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {fuelFileName}</div>}
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input type="url" placeholder="CSV link" value={fuelUrl} onChange={(e)=>setFuelUrl(e.target.value)}
+                       style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                <button style={styles.btnAccent} onClick={()=>syncFuelFromLink()}>Sync</button>
+              </div>
+            </div>
+
+            <div style={{ minWidth: 260 }}>
+              <div style={{ fontSize: 12, ...styles.muted }}>Upload Expenses CSV</div>
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleExpenseFile}
+                     style={{ width: "100%", background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+              {expenseFileName && <div style={{ fontSize: 11, ...styles.muted, marginTop: 4 }}>Loaded: {expenseFileName}</div>}
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input type="url" placeholder="CSV link" value={expenseUrl} onChange={(e)=>setExpenseUrl(e.target.value)}
+                       style={{ flex: 1, background: "transparent", color: "#e6e8ee", border: "1px solid #232838", borderRadius: 10, padding: "6px 10px" }}/>
+                <button style={styles.btnAccent} onClick={()=>syncExpenseFromLink()}>Sync</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
